@@ -657,12 +657,18 @@ async function seguirDestino() {
     try {
       const alvo = new URL(destino);
       const { sistemas } = await api("/api/meus-sistemas");
-      const permitido = sistemas.some((s) => {
+      const sistema = sistemas.find((s) => {
         try { return new URL(s.url, location.href).origin === alvo.origin; } catch { return false; }
       });
-      if (permitido && /^https?:$/.test(alvo.protocol)) {
-        location.href = alvo.href;
-        return;
+      if (sistema && /^https?:$/.test(alvo.protocol)) {
+        if (sistema.disponivel) {
+          location.href = alvo.href;
+          return;
+        }
+        // Voltar para um sistema parado so levaria a pagina de erro do proxy.
+        setTimeout(() => toast(eu?.perfil === "admin"
+          ? `${sistema.nome} está fora do ar. Inicie-o em Soluções.`
+          : `${sistema.nome} está fora do ar no momento. Tente de novo mais tarde.`), 300);
       }
     } catch { /* destino inválido: segue para o início */ }
   }
