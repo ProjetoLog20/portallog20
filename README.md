@@ -46,6 +46,10 @@ navegador ──► :8000  portal ──────────────┐ 
 
 ### Testar numa VM
 
+Passo a passo completo para entregar a outra pessoa, incluindo como dar acesso aos
+repositórios privados: [docs/instalar-em-uma-vm.md](docs/instalar-em-uma-vm.md).
+
+
 1. **Crie a VM** com Ubuntu Server 24.04 (2 CPUs, 4 GB de RAM e 30 GB de disco bastam).
    - *Hyper-V* (Windows Pro): use o **Default Switch**; a VM ganha um IP que o seu computador alcança.
    - *VirtualBox*: na rede da VM, escolha **Placa em modo Bridge**.
