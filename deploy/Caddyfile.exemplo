@@ -1,0 +1,25 @@
+# Exemplo de proxy reverso com HTTPS automatico (Caddy) para o servidor.
+#
+# Cada solucao ganha um subdominio, e o Caddy pergunta ao portal se a pessoa logada
+# tem acesso antes de deixar passar (forward auth). Sem login, ela e levada ao portal.
+#
+# No .env do portal:
+#   PORTAL_COOKIE_SEGURO=true
+#   PORTAL_URL_PUBLICA=https://portal.log20.com.br
+#   PORTAL_COOKIE_DOMINIO=.log20.com.br
+#   PORTAL_PROXIES=*
+#   PORTAL_BIND_SOLUCOES=127.0.0.1
+# E, no portal, em Gerenciar > Central do Colaborador > Endereco publico:
+#   https://rh.log20.com.br
+
+portal.log20.com.br {
+	reverse_proxy localhost:8000
+}
+
+rh.log20.com.br {
+	forward_auth localhost:8000 {
+		uri /api/auth/verificar?solucao=central-colaborador
+		copy_headers X-Portal-Usuario
+	}
+	reverse_proxy localhost:8101
+}

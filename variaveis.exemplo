@@ -1,0 +1,23 @@
+# Configuracao do portal no servidor. Copie para .env (cp variaveis.exemplo .env) e ajuste.
+# O script deploy/preparar-vm.sh cria o .env sozinho, com o IP da maquina.
+
+# Endereco da maquina como os usuarios a acessam (sem porta).
+# As solucoes ficam em <PORTAL_URL_BASE>:<porta da solucao>, ex.: http://192.168.0.10:8101
+PORTAL_URL_BASE=http://192.168.0.10
+
+# Endereco do proprio portal. Quem tenta abrir uma solucao sem login e mandado para ca.
+PORTAL_URL_PUBLICA=http://192.168.0.10:8000
+
+# Token de LEITURA do GitHub para o portal clonar repositorios privados das solucoes.
+# Crie em github.com -> Settings -> Developer settings -> Fine-grained tokens, com acesso
+# "Contents: Read-only" aos repositorios das solucoes. Deixe vazio se forem publicos.
+PORTAL_GIT_TOKEN=
+
+# Duracao da sessao de login, em horas.
+PORTAL_SESSAO_HORAS=12
+
+# ---- So com HTTPS e dominios proprios (veja deploy/Caddyfile.exemplo) ----
+# PORTAL_COOKIE_SEGURO=true
+# PORTAL_URL_PUBLICA=https://portal.log20.com.br
+# PORTAL_COOKIE_DOMINIO=.log20.com.br
+# PORTAL_PROXIES=*

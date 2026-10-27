@@ -1,0 +1,59 @@
+# Portal de Solucoes no servidor (ou numa VM de teste).
+#
+# Atalho: bash deploy/preparar-vm.sh  (instala o Docker, cria o .env, sobe tudo e cria o admin)
+#
+# Manual:
+#   1. cp variaveis.exemplo .env   e ajuste o IP
+#   2. docker compose up -d --build
+#   3. docker compose exec portal python -m marketplace criar-admin
+#
+# Quem entra por onde:
+#   http://<ip>:8000          portal (login, Meus sistemas, administracao)
+#   http://<ip>:8101, :8102   solucoes, sempre pelo Caddy, que pergunta ao portal se a pessoa pode entrar
+# As solucoes nao abrem nenhuma porta propria: ficam so na rede interna "log20".
+
+services:
+  portal:
+    build: .
+    container_name: log20-portal
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORTAL_HOST: 0.0.0.0
+      # Solucoes criadas na rede interna, sem portas publicadas: so o Caddy chega nelas.
+      PORTAL_REDE_DOCKER: log20
+      PORTAL_PUBLICAR_PORTAS: "false"
+    ports:
+      - "8000:8000"
+    networks:
+      - log20
+    volumes:
+      # Acesso ao Docker da maquina para construir e iniciar as solucoes.
+      # Atencao: quem administra o portal controla o Docker desta maquina.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Esta pasta (o clone do portal): codigo, manifestos em solucoes/ e dados em dados/.
+      # O codigo das solucoes e clonado pelo portal em dados/fontes/.
+      - .:/portal
+
+  caddy:
+    image: caddy:2
+    container_name: log20-caddy
+    restart: unless-stopped
+    depends_on:
+      - portal
+    # Uma porta por solucao, igual a "porta_host" do manifesto dela.
+    ports:
+      - "8101:8101"
+      - "8102:8102"
+    networks:
+      - log20
+    volumes:
+      - ./deploy/Caddyfile.servidor:/etc/caddy/Caddyfile:ro
+      - caddy-dados:/data
+
+networks:
+  log20:
+    name: log20
+
+volumes:
+  caddy-dados:

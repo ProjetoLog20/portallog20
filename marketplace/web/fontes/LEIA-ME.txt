@@ -1,0 +1,3 @@
+Poppins (Indian Type Foundry), subconjunto latino em WOFF.
+Licenca: SIL Open Font License 1.1 - https://openfontlicense.org
+Fonte original: https://fonts.google.com/specimen/Poppins

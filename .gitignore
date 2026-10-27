@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+# Usuarios, sessoes, segredos e configuracoes de cada solucao
+dados/
+.env

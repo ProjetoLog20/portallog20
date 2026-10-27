@@ -1,0 +1,61 @@
+"""Configuracao do portal por variaveis de ambiente (os padroes servem para uso local)."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+RAIZ = Path(__file__).resolve().parent.parent
+
+
+def _bool(nome: str, padrao: bool = False) -> bool:
+    valor = os.environ.get(nome)
+    if valor is None:
+        return padrao
+    return valor.strip().lower() in {"1", "true", "sim", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class Config:
+    pasta_solucoes: Path
+    pasta_dados: Path
+    # Endereco que os usuarios usam para chegar ao servidor, sem porta (ex.: http://192.168.0.10).
+    url_base: str
+    # Interface em que as portas das solucoes sao publicadas: 127.0.0.1 (so a maquina) ou 0.0.0.0 (rede).
+    bind_solucoes: str
+    # Como o portal alcanca as solucoes para checar se estao no ar.
+    host_interno: str
+    # Rede do Docker em que as solucoes sao criadas (ex.: "log20"); vazio usa a rede padrao.
+    rede_docker: str
+    # False: as solucoes nao abrem porta na maquina; so o proxy (Caddy) na mesma rede chega nelas.
+    publicar_portas: bool
+    cookie_seguro: bool
+    # Ex.: ".log20.com.br" para a sessao valer tambem nos subdominios das solucoes (forward auth).
+    cookie_dominio: str
+    # Endereco publico do proprio portal (usado para redirecionar ao login).
+    url_publica: str
+    sessao_horas: int
+    docs_api: bool
+    # Token de leitura para clonar repositorios privados das solucoes (enviado so para git_host).
+    git_token: str
+    git_host: str
+
+
+def carregar() -> Config:
+    return Config(
+        pasta_solucoes=Path(os.environ.get("PORTAL_SOLUCOES", RAIZ / "solucoes")),
+        pasta_dados=Path(os.environ.get("PORTAL_DADOS", RAIZ / "dados")),
+        url_base=os.environ.get("PORTAL_URL_BASE", "http://localhost").rstrip("/"),
+        bind_solucoes=os.environ.get("PORTAL_BIND_SOLUCOES", "127.0.0.1"),
+        host_interno=os.environ.get("PORTAL_HOST_INTERNO", "127.0.0.1"),
+        rede_docker=os.environ.get("PORTAL_REDE_DOCKER", ""),
+        publicar_portas=_bool("PORTAL_PUBLICAR_PORTAS", True),
+        cookie_seguro=_bool("PORTAL_COOKIE_SEGURO"),
+        cookie_dominio=os.environ.get("PORTAL_COOKIE_DOMINIO", ""),
+        url_publica=os.environ.get("PORTAL_URL_PUBLICA", "").rstrip("/"),
+        sessao_horas=int(os.environ.get("PORTAL_SESSAO_HORAS", "12")),
+        docs_api=_bool("PORTAL_DOCS_API"),
+        git_token=os.environ.get("PORTAL_GIT_TOKEN", "").strip(),
+        git_host=os.environ.get("PORTAL_GIT_HOST", "github.com").strip(),
+    )

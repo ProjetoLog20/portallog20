@@ -1,0 +1,30 @@
+# Caddy do servidor (usado pelo docker-compose.yml do portal).
+#
+# Cada solucao tem um bloco com a porta publica (igual a "porta_host" do manifesto),
+# o id dela e o endereco interno: <nome do container>:<porta_container>.
+# O container se chama "log20-<id>" e esta na rede interna "log20".
+#
+# Ao publicar uma solucao nova: copie um bloco, ajuste os tres valores, abra a porta em
+# docker-compose.yml (servico caddy) e rode:  docker compose up -d caddy
+
+(solucao) {
+	# Antes de cada pedido, pergunta ao portal se a pessoa esta logada e tem acesso.
+	forward_auth portal:8000 {
+		uri /api/auth/verificar?solucao={args[0]}
+		copy_headers X-Portal-Usuario
+	}
+	reverse_proxy {args[1]}
+
+	handle_errors {
+		header Content-Type "text/plain; charset=utf-8"
+		respond "Este sistema está fora do ar no momento. Tente de novo em alguns minutos ou avise o administrador." 503
+	}
+}
+
+:8101 {
+	import solucao central-colaborador log20-central-colaborador:4000
+}
+
+:8102 {
+	import solucao central-colaborador-homologacao log20-central-colaborador-homologacao:4000
+}

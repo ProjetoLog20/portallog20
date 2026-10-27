@@ -1,0 +1,31 @@
+# Proxy de teste na propria maquina: protege as solucoes com o login do portal.
+#
+#   Portal ......................... http://localhost:8000  (python -m marketplace)
+#   Central do Colaborador ......... http://localhost:9101  -> container na porta 8101
+#   Central do Colaborador (homol.)  http://localhost:9102  -> container na porta 8102
+#
+# Os cookies valem para o endereco (localhost) sem olhar a porta, entao a sessao aberta
+# no portal tambem chega ao Caddy nas portas 9101 e 9102. No servidor funciona igual,
+# com o Caddy rodando la e os usuarios acessando http://<ip-do-servidor>:9101.
+#
+# Antes de cada pedido, o Caddy pergunta ao portal (/api/auth/verificar) se a pessoa
+# esta logada e tem acesso a solucao. Sem login, ela vai para o login do portal e depois
+# volta; sem permissao, ve "Acesso nao liberado".
+#
+# Rodar (na pasta portal):  caddy run --config deploy/Caddyfile.local
+
+:9101 {
+	forward_auth 127.0.0.1:8000 {
+		uri /api/auth/verificar?solucao=central-colaborador
+		copy_headers X-Portal-Usuario
+	}
+	reverse_proxy 127.0.0.1:8101
+}
+
+:9102 {
+	forward_auth 127.0.0.1:8000 {
+		uri /api/auth/verificar?solucao=central-colaborador-homologacao
+		copy_headers X-Portal-Usuario
+	}
+	reverse_proxy 127.0.0.1:8102
+}
