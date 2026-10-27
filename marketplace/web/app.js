@@ -309,9 +309,10 @@ async function telaSolucoes() {
             try {
               const r = await api("/api/catalogo/recarregar", { method: "POST" });
               await atualizarSolucoes();
-              toast(r.erros_catalogo.length
-                ? `Catálogo recarregado com ${r.erros_catalogo.length} erro(s); veja o aviso no topo.`
-                : `Catálogo recarregado: ${r.total} solução(ões).`);
+              const problemas = r.erros_catalogo.length + (r.proxy?.erro ? 1 : 0);
+              toast(problemas
+                ? `Catálogo recarregado com ${problemas} problema(s); veja o aviso no topo.`
+                : `Catálogo recarregado: ${r.total} solução(ões).${r.proxy?.aplicado ? " Acesso pelo Caddy atualizado." : ""}`);
             } catch (e) { toast(e.message); }
             ev.target.disabled = false;
           },
@@ -329,6 +330,9 @@ async function atualizarSolucoes() {
   document.getElementById("docker-slot").replaceChildren(docker);
   const erros = document.getElementById("erros-catalogo");
   erros.replaceChildren();
+  if (dados.proxy?.erro) {
+    erros.append(h("div", { class: "aviso" }, `Acesso às soluções (Caddy): ${dados.proxy.mensagem}`));
+  }
   if (dados.erros_catalogo.length) {
     erros.append(h("div", { class: "aviso" }, "Alguns manifestos não puderam ser lidos:",
       h("ul", {}, dados.erros_catalogo.map((m) => h("li", {}, m)))));

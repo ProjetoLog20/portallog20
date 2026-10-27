@@ -35,7 +35,7 @@ alguns minutos). Em **Usuários**, crie as pessoas e marque os sistemas de cada 
 ## Rodar no servidor ou numa VM (Docker Compose)
 
 No servidor tudo roda em Docker: o **portal** (porta 8000) e o **Caddy**, que é a única
-entrada das soluções (8101, 8102...). As soluções ficam numa rede interna do Docker, sem
+entrada das soluções (uma porta por solução, na faixa 8101-8130). As soluções ficam numa rede interna do Docker, sem
 portas próprias, então só abrem para quem está logado no portal e tem acesso a elas.
 
 ```
@@ -83,9 +83,10 @@ docker compose up -d --build
 docker compose exec portal python -m marketplace criar-admin
 ```
 
-Ao publicar uma solução nova no servidor, além do manifesto, adicione um bloco em
-`deploy/Caddyfile.servidor`, abra a porta dela no serviço `caddy` do `docker-compose.yml` e
-rode `docker compose up -d caddy`.
+A configuração do Caddy é **gerada pelo portal** a partir dos manifestos (em
+`dados/caddy/Caddyfile`) e recarregada sozinha; não edite esse arquivo. O Caddy publica a faixa
+de portas `8101-8130`, uma por solução; para ampliar, mude a faixa no serviço `caddy` e em
+`PORTAL_FAIXA_PORTAS`, no `docker-compose.yml`.
 
 O container do portal recebe acesso ao Docker do servidor (`/var/run/docker.sock`), então
 quem é administrador do portal controla o Docker daquela máquina. Crie poucos administradores.
@@ -153,6 +154,8 @@ use `http://<ip>:9101` como endereço público. As portas 8101/8102 ficam só em
 | `PORTAL_PUBLICAR_PORTAS` | `true` | `false` não abre porta para as soluções: só o Caddy na mesma rede chega nelas |
 | `PORTAL_GIT_TOKEN` | | Token de leitura para clonar repositórios privados das soluções |
 | `PORTAL_GIT_HOST` | `github.com` | Único servidor Git que recebe o token |
+| `PORTAL_CADDY_CONTAINER` | | Container do Caddy que o portal configura (`log20-caddy` no compose) |
+| `PORTAL_FAIXA_PORTAS` | | Faixa publicada pelo Caddy (`8101-8130` no compose); portas fora dela são recusadas |
 | `PORTAL_DOCS_API` | `false` | `true` libera a documentação da API em `/docs` |
 
 ## Segurança
@@ -169,11 +172,19 @@ use `http://<ip>:9101` como endereço público. As portas 8101/8102 ficam só em
 
 ## Publicar uma nova solução
 
-1. A solução precisa de um `Dockerfile` que suba a aplicação numa porta HTTP.
-2. Crie `solucoes/<id>/solucao.toml` copiando o da Central do Colaborador e ajuste
-   `id`, `nome`, `[build].contexto`, `porta_container`, `porta_host` (única por solução)
-   e `caminho_saude`. Campos soltos (como `segredos`) devem vir antes da primeira `[tabela]`.
-3. Reinicie o portal. Depois, em **Usuários**, libere a nova solução para quem deve vê-la.
+1. A solução precisa de um repositório Git com um `Dockerfile` que suba a aplicação numa
+   porta HTTP e, de preferência, com uma rota de saúde (ex.: `/api/health`).
+2. No repositório do portal, crie `solucoes/<id>/solucao.toml` copiando o da Central do
+   Colaborador e ajuste `id`, `nome`, `[build].repositorio`, `porta_container`,
+   `porta_host` (única, dentro da faixa 8101-8130) e `caminho_saude`. Campos soltos (como
+   `segredos`) devem vir antes da primeira `[tabela]`. Faça commit e push.
+3. No servidor, na pasta do portal: `git pull`.
+4. No portal: **Soluções → Recarregar catálogo**. O portal gera a configuração do Caddy,
+   valida e aplica sozinho; a porta nova passa a responder na hora.
+5. **Instalar e iniciar** na solução nova e, em **Usuários**, libere-a para quem deve vê-la.
+
+Se o manifesto ou a configuração gerada tiverem algum problema, ele aparece num aviso no
+topo da tela de Soluções, e o acesso às soluções que já estavam no ar continua como estava.
 
 | Campo | Para que serve |
 | --- | --- |

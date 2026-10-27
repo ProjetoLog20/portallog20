@@ -172,6 +172,13 @@ def remove(name: str) -> None:
         _check(result, "Falha ao remover o container")
 
 
+def executar_em(container: str, args: list[str], timeout: float = 60) -> tuple[bool, str]:
+    """docker exec: roda um comando dentro de um container. Devolve (ok, saida)."""
+    resultado = _run(["exec", container, *args], timeout=timeout)
+    saida = "\n".join(p for p in (resultado.stdout, resultado.stderr) if p).strip()
+    return resultado.returncode == 0, saida
+
+
 def logs(name: str, tail: int = 300) -> str:
     # stream() junta stdout e stderr do container na ordem em que foram escritos.
     lines: list[str] = []

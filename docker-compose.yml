@@ -9,8 +9,10 @@
 #
 # Quem entra por onde:
 #   http://<ip>:8000          portal (login, Meus sistemas, administracao)
-#   http://<ip>:8101, :8102   solucoes, sempre pelo Caddy, que pergunta ao portal se a pessoa pode entrar
+#   http://<ip>:8101..8130    solucoes, sempre pelo Caddy, que pergunta ao portal se a pessoa pode entrar
 # As solucoes nao abrem nenhuma porta propria: ficam so na rede interna "log20".
+# A configuracao do Caddy e gerada pelo portal a partir dos manifestos (dados/caddy/Caddyfile):
+# para publicar uma solucao basta o manifesto + "Recarregar catalogo"; nada aqui muda.
 
 services:
   portal:
@@ -23,6 +25,10 @@ services:
       # Solucoes criadas na rede interna, sem portas publicadas: so o Caddy chega nelas.
       PORTAL_REDE_DOCKER: log20
       PORTAL_PUBLICAR_PORTAS: "false"
+      # O portal escreve o Caddyfile em dados/caddy e recarrega este container.
+      PORTAL_CADDY_CONTAINER: log20-caddy
+      # Mesma faixa publicada pelo servico caddy abaixo; manifestos fora dela sao recusados.
+      PORTAL_FAIXA_PORTAS: "8101-8130"
     ports:
       - "8000:8000"
     networks:
@@ -41,14 +47,21 @@ services:
     restart: unless-stopped
     depends_on:
       - portal
-    # Uma porta por solucao, igual a "porta_host" do manifesto dela.
+    # Na primeira subida espera o portal gerar a configuracao.
+    command:
+      - sh
+      - -c
+      - >-
+        until [ -f /etc/caddy/Caddyfile ]; do echo "Aguardando o portal gerar /etc/caddy/Caddyfile..."; sleep 2; done;
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    # Faixa reservada para as solucoes (uma porta por solucao, a "porta_host" do manifesto).
+    # So as portas com solucao cadastrada respondem. Para ampliar, mude aqui e em PORTAL_FAIXA_PORTAS.
     ports:
-      - "8101:8101"
-      - "8102:8102"
+      - "8101-8130:8101-8130"
     networks:
       - log20
     volumes:
-      - ./deploy/Caddyfile.servidor:/etc/caddy/Caddyfile:ro
+      - ./dados/caddy:/etc/caddy:ro
       - caddy-dados:/data
 
 networks:

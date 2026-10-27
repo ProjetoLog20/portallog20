@@ -83,10 +83,11 @@ PY
 fi
 
 # ---------- firewall ----------
-PORTAS=$(grep -oE '"[0-9]+:[0-9]+"' docker-compose.yml | tr -d '"' | cut -d: -f1 | sort -u)
+# Portas publicadas no docker-compose.yml: "8000:8000" e a faixa das solucoes "8101-8130:8101-8130".
+PORTAS=$(grep -oE '"[0-9]+(-[0-9]+)?:[0-9]+(-[0-9]+)?"' docker-compose.yml | tr -d '"' | cut -d: -f1 | sort -u)
 if command -v ufw >/dev/null 2>&1 && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
   azul "Liberando no firewall as portas: $(echo $PORTAS)"
-  for p in $PORTAS; do sudo ufw allow "$p"/tcp >/dev/null; done
+  for p in $PORTAS; do sudo ufw allow "${p/-/:}"/tcp >/dev/null; done
 fi
 
 # ---------- subir ----------
@@ -122,8 +123,7 @@ azul "Pronto!"
 cat <<FIM
 
   Portal:        http://$IP:8000
-  Soluções:      http://$IP:8101  (Central do Colaborador)
-                 http://$IP:8102  (Central do Colaborador - Homologação)
+  Soluções:      http://$IP:8101, :8102...  (uma porta por solução, veja em Soluções)
 
   1. Abra o portal no navegador do seu computador e entre com o administrador.
   2. Em Soluções, clique em "Instalar e iniciar" (o primeiro build leva alguns minutos).
@@ -133,7 +133,7 @@ cat <<FIM
 
   Comandos úteis (nesta pasta):
     ${DOCKER[*]} compose logs -f portal     # acompanhar o portal
-    ${DOCKER[*]} compose restart caddy      # depois de editar deploy/Caddyfile.servidor
+    ${DOCKER[*]} compose logs -f caddy      # acompanhar o Caddy (acesso às soluções)
     ${DOCKER[*]} compose down               # parar portal e Caddy (as soluções continuam)
 FIM
 

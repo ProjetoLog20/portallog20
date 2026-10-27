@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 
 from . import config as config_mod
-from . import docker_cli
+from . import docker_cli, proxy
 from .auth import Autenticacao, ErroAuth, Usuario
 from .catalog import Solucao, carregar_catalogo
 from .manager import ACOES, Armazenamento, Gerenciador
@@ -35,8 +35,28 @@ _estado: dict = {}
 
 def _carregar() -> None:
     solucoes, erros = carregar_catalogo(CFG.pasta_solucoes)
+    if CFG.faixa_portas:
+        inicio, fim = CFG.faixa_portas
+        for sid, sol in list(solucoes.items()):
+            if not inicio <= sol.porta_host <= fim:
+                erros.append(f"{sol.manifesto}: porta_host {sol.porta_host} fora da faixa publicada pelo Caddy "
+                             f"({inicio}-{fim}); a solucao foi ignorada")
+                del solucoes[sid]
     _estado["erros"] = erros
     _estado["gerenciador"] = Gerenciador(solucoes, Armazenamento(CFG.pasta_dados), CFG)
+    _estado["proxy"] = _atualizar_proxy(list(solucoes.values()))
+
+
+def _atualizar_proxy(solucoes) -> dict | None:
+    """Regera a configuracao do Caddy a partir do catalogo (so quando o portal gerencia o Caddy)."""
+    if not CFG.caddy_container:
+        return None
+    try:
+        r = proxy.aplicar(proxy.gerar(solucoes, CFG.portal_upstream), CFG.caddy_pasta, CFG.caddy_container)
+    except Exception as exc:  # noqa: BLE001 - o portal continua no ar mesmo se o Caddy falhar
+        r = proxy.Resultado(False, f"Falha ao atualizar o Caddy: {exc}", erro=True)
+    print(f"[caddy] {r.mensagem}", flush=True)
+    return {"aplicado": r.aplicado, "mensagem": r.mensagem, "erro": r.erro}
 
 
 _carregar()
@@ -287,6 +307,7 @@ def api_listar(_: Usuario = Depends(exigir_admin)) -> dict:
     return {
         "solucoes": [_resumo(s, docker_ok) for s in ger().solucoes.values()],
         "erros_catalogo": _estado["erros"],
+        "proxy": _estado.get("proxy"),
     }
 
 
@@ -296,7 +317,7 @@ def api_recarregar(_: Usuario = Depends(exigir_admin)) -> dict:
     if ocupadas:
         raise HTTPException(409, f"Aguarde as operacoes em andamento: {', '.join(ocupadas)}")
     _carregar()
-    return {"total": len(ger().solucoes), "erros_catalogo": _estado["erros"]}
+    return {"total": len(ger().solucoes), "erros_catalogo": _estado["erros"], "proxy": _estado.get("proxy")}
 
 
 @app.get("/api/solucoes/{sid}")

@@ -59,8 +59,8 @@ No navegador de qualquer computador que enxergue a VM:
 1. `http://IP-DA-VM:8000` → entrar com o administrador.
 2. **Soluções → Central do Colaborador → Instalar e iniciar** (primeira vez: alguns minutos).
 3. **Usuários** → criar as pessoas e marcar os sistemas de cada uma.
-4. As soluções ficam em `http://IP-DA-VM:8101` (Central) e `:8102` (Homologação) e só
-   abrem para quem está logado no portal e tem acesso.
+4. Cada solução tem sua porta (a Central em `http://IP-DA-VM:8101`, a Homologação em
+   `:8102`) e só abre para quem está logado no portal e tem acesso.
 
 ## Atualizar depois
 

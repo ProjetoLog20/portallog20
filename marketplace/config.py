@@ -40,6 +40,13 @@ class Config:
     # Token de leitura para clonar repositorios privados das solucoes (enviado so para git_host).
     git_token: str
     git_host: str
+    # Caddy gerenciado pelo portal: nome do container (vazio = o portal nao mexe no Caddy),
+    # pasta onde o portal escreve o Caddyfile e endereco do portal visto pelo Caddy.
+    caddy_container: str
+    caddy_pasta: Path
+    portal_upstream: str
+    # Faixa de portas publicada pelo Caddy (ex.: (8101, 8150)); None = sem restricao.
+    faixa_portas: tuple[int, int] | None
 
 
 def carregar() -> Config:
@@ -58,4 +65,20 @@ def carregar() -> Config:
         docs_api=_bool("PORTAL_DOCS_API"),
         git_token=os.environ.get("PORTAL_GIT_TOKEN", "").strip(),
         git_host=os.environ.get("PORTAL_GIT_HOST", "github.com").strip(),
+        caddy_container=os.environ.get("PORTAL_CADDY_CONTAINER", "").strip(),
+        caddy_pasta=Path(os.environ.get("PORTAL_CADDY_PASTA", RAIZ / "dados" / "caddy")),
+        portal_upstream=os.environ.get("PORTAL_UPSTREAM", "portal:8000").strip(),
+        faixa_portas=_faixa(os.environ.get("PORTAL_FAIXA_PORTAS", "")),
     )
+
+
+def _faixa(valor: str) -> tuple[int, int] | None:
+    """"8101-8150" -> (8101, 8150)."""
+    valor = valor.strip()
+    if not valor:
+        return None
+    inicio, _, fim = valor.partition("-")
+    a, b = int(inicio), int(fim or inicio)
+    if not (1 <= a <= b <= 65535):
+        raise ValueError(f"PORTAL_FAIXA_PORTAS invalida: {valor}")
+    return a, b
