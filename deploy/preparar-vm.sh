@@ -93,13 +93,19 @@ fi
 azul "Construindo e subindo portal + Caddy (a primeira vez leva alguns minutos)"
 "${DOCKER[@]}" compose up -d --build
 
-azul "Aguardando o portal responder"
-for _ in $(seq 1 60); do
-  if curl -fsS -o /dev/null "http://127.0.0.1:8000/"; then break; fi
+azul "Aguardando o portal responder (ate 3 minutos)"
+PRONTO=0
+for _ in $(seq 1 90); do
+  # Silencioso: enquanto o portal inicia, a conexao e recusada/reiniciada, o que e normal.
+  if curl -fs -o /dev/null "http://127.0.0.1:8000/"; then PRONTO=1; break; fi
+  printf '.'
   sleep 2
 done
-if ! curl -fsS -o /dev/null "http://127.0.0.1:8000/"; then
-  aviso "O portal nao respondeu. Veja os logs com: ${DOCKER[*]} compose logs portal"
+echo
+if [ "$PRONTO" != "1" ]; then
+  aviso "O portal nao respondeu. Situacao dos containers e ultimas linhas do log:"
+  "${DOCKER[@]}" compose ps
+  "${DOCKER[@]}" compose logs --tail 40 portal
   exit 1
 fi
 
