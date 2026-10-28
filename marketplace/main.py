@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config as config_mod
 from . import docker_cli, proxy
-from .auth import Autenticacao, ErroAuth, Usuario
+from .auth import Autenticacao, ErroAuth, ErroLote, Usuario
 from .catalog import Solucao, carregar_catalogo
 from .manager import ACOES, Armazenamento, Gerenciador
 
@@ -22,7 +22,7 @@ COOKIE = "portal_sessao"
 
 app = FastAPI(
     title="Portal de Solucoes LOG20",
-    version="0.2.0",
+    version="0.3.0",
     docs_url="/docs" if CFG.docs_api else None,
     redoc_url=None,
     openapi_url="/openapi.json" if CFG.docs_api else None,
@@ -95,6 +95,11 @@ async def protecoes(request: Request, call_next):
 @app.exception_handler(ErroAuth)
 async def _erro_auth(_: Request, exc: ErroAuth):
     return JSONResponse({"detail": str(exc)}, status_code=400)
+
+
+@app.exception_handler(ErroLote)
+async def _erro_lote(_: Request, exc: ErroLote):
+    return JSONResponse({"detail": str(exc), "problemas": exc.problemas}, status_code=400)
 
 
 # ---------------- sessao e permissoes ----------------
@@ -417,11 +422,23 @@ def _validar_solucoes(ids: list[str]) -> list[str]:
     return ids
 
 
+def _nomes_solucoes(ids) -> str:
+    return ", ".join(ger().solucoes[s].nome if s in ger().solucoes else s for s in sorted(ids))
+
+
+def _lista_curta(nomes: list[str], limite: int = 8) -> str:
+    resto = len(nomes) - limite
+    return ", ".join(nomes[:limite]) + (f" e mais {resto}" if resto > 0 else "")
+
+
 @app.get("/api/usuarios")
 def api_usuarios(_: Usuario = Depends(exigir_admin)) -> dict:
     return {
         "usuarios": AUTH.listar(),
-        "solucoes": [{"id": s.id, "nome": s.nome} for s in ger().solucoes.values()],
+        "solucoes": [
+            {"id": s.id, "nome": s.nome, "categoria": s.categoria, "logo": _logo_url(s)}
+            for s in ger().solucoes.values()
+        ],
     }
 
 
@@ -431,12 +448,33 @@ def api_criar_usuario(
     nome: str = Body(...),
     perfil: str = Body("usuario"),
     solucoes: list[str] | None = Body(None),
-    _: Usuario = Depends(exigir_admin),
+    autor: Usuario = Depends(exigir_admin),
 ) -> dict:
     solucoes = _validar_solucoes(solucoes or [])
     novo, senha = AUTH.criar_usuario(usuario, nome, perfil)
-    AUTH.definir_acessos(novo.id, solucoes)
+    if not novo.admin:
+        AUTH.definir_acessos(novo.id, solucoes)
+    detalhe = f"{novo.usuario} ({'administrador' if novo.admin else 'usuário'})"
+    if solucoes and not novo.admin:
+        detalhe += f" com acesso a {_nomes_solucoes(solucoes)}"
+    AUTH.registrar(autor, "Criou usuário", detalhe)
     return {"usuario": _publico(novo), "senha_temporaria": senha}
+
+
+@app.post("/api/usuarios/lote", status_code=201)
+def api_criar_lote(
+    usuarios: list[dict] = Body(...),
+    solucoes: list[str] | None = Body(None),
+    autor: Usuario = Depends(exigir_admin),
+) -> dict:
+    """Cria varios usuarios (todos ou nenhum) e devolve as senhas temporarias uma unica vez."""
+    solucoes = _validar_solucoes(solucoes or [])
+    criados = AUTH.criar_lote(usuarios, solucoes)
+    detalhe = f"{len(criados)} usuário(s): {_lista_curta([u.usuario for u, _ in criados])}"
+    if solucoes:
+        detalhe += f". Acesso a {_nomes_solucoes(solucoes)}"
+    AUTH.registrar(autor, "Criou usuários em lote", detalhe)
+    return {"criados": [{**_publico(u), "senha_temporaria": s} for u, s in criados]}
 
 
 @app.patch("/api/usuarios/{uid}")
@@ -448,13 +486,31 @@ def api_editar_usuario(
     solucoes: list[str] | None = Body(None),
     autor: Usuario = Depends(exigir_admin),
 ) -> dict:
-    if AUTH.obter(uid) is None:
+    antes = AUTH.obter(uid)
+    if antes is None:
         raise HTTPException(404, "Usuario nao encontrado")
     if solucoes is not None:
         _validar_solucoes(solucoes)
+    acessos_antes = AUTH.acessos(uid)
     atualizado = AUTH.atualizar(uid, nome=nome, perfil=perfil, ativo=ativo, autor=autor)
     if solucoes is not None:
-        AUTH.definir_acessos(uid, solucoes)
+        AUTH.definir_acessos(uid, [] if atualizado.admin else solucoes)
+
+    mudancas = []
+    if atualizado.nome != antes.nome:
+        mudancas.append(f"nome para '{atualizado.nome}'")
+    if atualizado.perfil != antes.perfil:
+        mudancas.append("perfil para administrador" if atualizado.admin else "perfil para usuário")
+    if atualizado.ativo != antes.ativo:
+        mudancas.append("reativou" if atualizado.ativo else "desativou")
+    if solucoes is not None:
+        depois = AUTH.acessos(uid)
+        if depois - acessos_antes:
+            mudancas.append(f"liberou {_nomes_solucoes(depois - acessos_antes)}")
+        if acessos_antes - depois:
+            mudancas.append(f"retirou {_nomes_solucoes(acessos_antes - depois)}")
+    if mudancas:
+        AUTH.registrar(autor, "Editou usuário", f"{antes.usuario}: {'; '.join(mudancas)}")
     return {"usuario": _publico(atualizado)}
 
 
@@ -462,4 +518,59 @@ def api_editar_usuario(
 def api_redefinir_senha(uid: int, autor: Usuario = Depends(exigir_admin)) -> dict:
     if uid == autor.id:
         raise HTTPException(400, "Para mudar a sua propria senha use 'Trocar senha'.")
-    return {"senha_temporaria": AUTH.redefinir_senha(uid)}
+    alvo = AUTH.obter(uid)
+    senha = AUTH.redefinir_senha(uid)
+    AUTH.registrar(autor, "Redefiniu senha", alvo.usuario if alvo else str(uid))
+    return {"senha_temporaria": senha}
+
+
+@app.post("/api/usuarios/situacao")
+def api_situacao_lote(
+    usuarios: list[int] = Body(...),
+    ativo: bool = Body(...),
+    autor: Usuario = Depends(exigir_admin),
+) -> dict:
+    """Ativa ou desativa varios usuarios. Quem nao pode mudar (ex.: o proprio admin) volta em `erros`."""
+    alterados, erros = [], []
+    for uid in dict.fromkeys(usuarios):
+        atual = AUTH.obter(uid)
+        if atual is None:
+            continue
+        if atual.ativo == ativo:
+            continue
+        try:
+            AUTH.atualizar(uid, ativo=ativo, autor=autor)
+            alterados.append(atual.usuario)
+        except ErroAuth as exc:
+            erros.append(f"{atual.usuario}: {exc}")
+    if alterados:
+        AUTH.registrar(autor, "Reativou usuários" if ativo else "Desativou usuários",
+                       _lista_curta(alterados))
+    return {"alterados": len(alterados), "erros": erros}
+
+
+# ---------------- administracao: acessos ----------------
+
+@app.post("/api/acessos")
+def api_acessos(
+    usuarios: list[int] = Body(...),
+    solucoes: list[str] = Body(...),
+    conceder: bool = Body(...),
+    autor: Usuario = Depends(exigir_admin),
+) -> dict:
+    """Libera (conceder=true) ou retira sistemas de varios usuarios de uma vez."""
+    _validar_solucoes(solucoes)
+    alterados = AUTH.alterar_acessos(usuarios, solucoes, conceder)
+    if alterados:
+        nomes = AUTH.nomes(usuarios)
+        AUTH.registrar(
+            autor,
+            "Liberou acesso" if conceder else "Retirou acesso",
+            f"{_nomes_solucoes(solucoes)} para {_lista_curta([nomes[u] for u in usuarios if u in nomes])}",
+        )
+    return {"alterados": alterados}
+
+
+@app.get("/api/historico")
+def api_historico(limite: int = 200, _: Usuario = Depends(exigir_admin)) -> dict:
+    return {"eventos": AUTH.historico(limite)}

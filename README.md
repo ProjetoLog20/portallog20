@@ -4,7 +4,12 @@ Portal para disponibilizar soluções conteinerizadas, com login.
 
 - **Usuários** entram com usuário e senha e veem só os sistemas liberados para eles.
 - **Administradores** também gerenciam as soluções (instalar, iniciar, parar, atualizar,
-  configurar, ver logs) e os usuários (criar, liberar sistemas, redefinir senha, desativar).
+  configurar, ver logs), os usuários e os acessos:
+  - **Usuários**: criar um a um ou **importar em lote** (colar do Excel ou abrir um CSV),
+    procurar, filtrar, editar, redefinir senha e, selecionando várias pessoas, liberar ou
+    retirar sistemas e desativar/reativar de uma vez;
+  - **Acessos**: tabela pessoa × sistema para marcar quem abre o quê (vale na hora) e o
+    **histórico** de quem mudou o quê (criações, acessos, perfis, senhas redefinidas).
 
 Cada solução é descrita por um manifesto (`solucoes/<id>/solucao.toml`). A primeira
 publicada é a **Central do Colaborador (Yuri)**.
@@ -157,6 +162,25 @@ use `http://<ip>:9101` como endereço público. As portas 8101/8102 ficam só em
 | `PORTAL_CADDY_CONTAINER` | | Container do Caddy que o portal configura (`log20-caddy` no compose) |
 | `PORTAL_FAIXA_PORTAS` | | Faixa publicada pelo Caddy (`8101-8130` no compose); portas fora dela são recusadas |
 | `PORTAL_DOCS_API` | `false` | `true` libera a documentação da API em `/docs` |
+
+## Importar usuários em lote
+
+Em **Usuários → Importar em lote**, cole uma pessoa por linha (ou abra um `.csv`):
+
+```
+login;nome;perfil
+maria.silva;Maria Silva
+10452;Ana Paula Lima;usuario
+joao.souza;João Souza;administrador
+```
+
+- O separador pode ser `;`, `,` ou tabulação (colar direto do Excel). A linha de cabeçalho é opcional.
+- O perfil é opcional (padrão: usuário). Marque os sistemas que todos os importados recebem.
+- A prévia aponta login inválido, repetido ou já cadastrado. **Ou cria todos, ou nenhum.**
+- No fim, baixe a planilha com as senhas temporárias: elas não aparecem de novo. Entregue
+  cada senha só à pessoa dona do login e apague o arquivo depois. No primeiro acesso cada um
+  cria a própria senha.
+- Máximo de 500 pessoas por vez.
 
 ## Segurança
 

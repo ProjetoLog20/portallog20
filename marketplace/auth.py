@@ -41,11 +41,32 @@ CREATE TABLE IF NOT EXISTS acessos (
   solucao_id TEXT NOT NULL,
   PRIMARY KEY (usuario_id, solucao_id)
 );
+CREATE TABLE IF NOT EXISTS auditoria (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quando REAL NOT NULL,
+  autor TEXT NOT NULL,
+  acao TEXT NOT NULL,
+  detalhe TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_auditoria_quando ON auditoria(quando);
 """
+
+LOTE_MAX = 500
+# Como o perfil pode vir escrito numa planilha.
+_PERFIL_TEXTO = {"": "usuario", "usuário": "usuario", "administrador": "admin", "administradora": "admin"}
+AUDITORIA_MAX = 5000
 
 
 class ErroAuth(ValueError):
     """Erro de validacao mostrado ao usuario."""
+
+
+class ErroLote(ErroAuth):
+    """Lote recusado: `problemas` traz {linha, usuario, erro} de cada linha com erro."""
+
+    def __init__(self, problemas: list[dict]):
+        super().__init__(f"{len(problemas)} linha(s) com problema; nenhum usuario foi criado.")
+        self.problemas = problemas
 
 
 # ---------------- senhas ----------------
@@ -130,6 +151,7 @@ class Usuario:
     ativo: bool
     trocar_senha: bool
     ultimo_login: float | None = None
+    criado_em: float | None = None
 
     @property
     def admin(self) -> bool:
@@ -145,6 +167,7 @@ def _usuario(row: sqlite3.Row) -> Usuario:
         ativo=bool(row["ativo"]),
         trocar_senha=bool(row["trocar_senha"]),
         ultimo_login=row["ultimo_login"],
+        criado_em=row["criado_em"],
     )
 
 
@@ -180,17 +203,26 @@ class Autenticacao:
                 return self.total_admins_ativos(d)
         return db.execute("SELECT COUNT(*) FROM usuarios WHERE perfil='admin' AND ativo=1").fetchone()[0]
 
+    @staticmethod
+    def _problema_cadastro(usuario: str, nome: str, perfil: str) -> str | None:
+        if not USUARIO_RE.match(usuario):
+            return "Usuario deve ter 3 a 60 caracteres: letras, numeros, ponto, hifen, _ ou @."
+        if not nome:
+            return "Informe o nome."
+        if len(nome) > 120:
+            return "Nome longo demais (maximo 120 caracteres)."
+        if perfil not in PERFIS:
+            return "Perfil invalido (use usuario ou admin)."
+        return None
+
     def criar_usuario(
         self, usuario: str, nome: str, perfil: str, senha: str | None = None, trocar_senha: bool = True
     ) -> tuple[Usuario, str]:
         usuario = usuario.strip()
         nome = nome.strip()
-        if not USUARIO_RE.match(usuario):
-            raise ErroAuth("Usuario deve ter 3 a 60 caracteres: letras, numeros, ponto, hifen, _ ou @.")
-        if not nome:
-            raise ErroAuth("Informe o nome.")
-        if perfil not in PERFIS:
-            raise ErroAuth("Perfil invalido.")
+        problema = self._problema_cadastro(usuario, nome, perfil)
+        if problema:
+            raise ErroAuth(problema)
         senha = senha or senha_temporaria()
         validar_senha(senha)
         with self._db() as db:
@@ -254,6 +286,110 @@ class Autenticacao:
                 "INSERT INTO acessos (usuario_id, solucao_id) VALUES (?, ?)",
                 [(uid, s) for s in sorted(set(solucoes))],
             )
+
+    def criar_lote(self, itens: list[dict], solucoes: list[str]) -> list[tuple[Usuario, str]]:
+        """Cria varios usuarios de uma vez, todos ou nenhum.
+
+        `itens`: [{usuario, nome, perfil?}]. Se alguma linha tiver problema (formato, repetida
+        na lista ou ja cadastrada), levanta ErroLote e nada e gravado.
+        """
+        if not itens:
+            raise ErroAuth("A lista esta vazia.")
+        if len(itens) > LOTE_MAX:
+            raise ErroAuth(f"Envie no maximo {LOTE_MAX} usuarios por vez.")
+        limpos = [{
+            "usuario": str(i.get("usuario") or "").strip(),
+            "nome": " ".join(str(i.get("nome") or "").split()),
+            "perfil": _PERFIL_TEXTO.get(str(i.get("perfil") or "").strip().lower(),
+                                        str(i.get("perfil") or "").strip().lower()),
+        } for i in itens]
+        problemas = self.validar_lote(limpos)
+        if problemas:
+            raise ErroLote(problemas)
+
+        # O hash (scrypt) e o passo lento: feito antes de abrir a transacao.
+        preparados = []
+        for item in limpos:
+            senha = senha_temporaria()
+            preparados.append((item, senha, gerar_hash(senha)))
+        criados: list[tuple[Usuario, str]] = []
+        with self._db() as db:
+            agora = time.time()
+            for item, senha, hash_ in preparados:
+                try:
+                    cur = db.execute(
+                        "INSERT INTO usuarios (usuario, nome, senha_hash, perfil, trocar_senha, criado_em)"
+                        " VALUES (?, ?, ?, ?, 1, ?)",
+                        (item["usuario"], item["nome"], hash_, item["perfil"], agora),
+                    )
+                except sqlite3.IntegrityError as exc:  # criado por outra pessoa no meio do caminho
+                    db.rollback()
+                    raise ErroAuth(f"O usuario '{item['usuario']}' ja existe. Nenhum usuario foi criado.") from exc
+                if item["perfil"] != "admin":
+                    db.executemany("INSERT INTO acessos (usuario_id, solucao_id) VALUES (?, ?)",
+                                   [(cur.lastrowid, s) for s in sorted(set(solucoes))])
+                row = db.execute("SELECT * FROM usuarios WHERE id = ?", (cur.lastrowid,)).fetchone()
+                criados.append((_usuario(row), senha))
+        return criados
+
+    def validar_lote(self, itens: list[dict]) -> list[dict]:
+        """Problemas de cada linha (numeradas a partir de 1), sem gravar nada."""
+        with self._db() as db:
+            existentes = {r[0].lower() for r in db.execute("SELECT usuario FROM usuarios")}
+        vistos: dict[str, int] = {}
+        problemas = []
+        for n, item in enumerate(itens, start=1):
+            usuario = item["usuario"]
+            erro = self._problema_cadastro(usuario, item["nome"], item["perfil"])
+            chave = usuario.lower()
+            if not erro and chave in existentes:
+                erro = "Ja existe um usuario com este login."
+            elif not erro and chave in vistos:
+                erro = f"Repetido na lista (linha {vistos[chave]})."
+            vistos.setdefault(chave, n)
+            if erro:
+                problemas.append({"linha": n, "usuario": usuario, "erro": erro})
+        return problemas
+
+    def alterar_acessos(self, uids: list[int], solucoes: list[str], conceder: bool) -> int:
+        """Concede ou retira sistemas de varios usuarios. Devolve quantas permissoes mudaram.
+
+        Administradores ja veem tudo: nao recebem permissoes individuais.
+        """
+        if not uids or not solucoes:
+            return 0
+        with self._db() as db:
+            marcas = ",".join("?" * len(uids))
+            alvos = [r[0] for r in db.execute(
+                f"SELECT id FROM usuarios WHERE id IN ({marcas}) AND perfil != 'admin'", list(uids))]
+            pares = [(u, s) for u in alvos for s in sorted(set(solucoes))]
+            antes = db.total_changes
+            if conceder:
+                db.executemany("INSERT OR IGNORE INTO acessos (usuario_id, solucao_id) VALUES (?, ?)", pares)
+            else:
+                db.executemany("DELETE FROM acessos WHERE usuario_id = ? AND solucao_id = ?", pares)
+            return db.total_changes - antes
+
+    def nomes(self, uids: list[int]) -> dict[int, str]:
+        if not uids:
+            return {}
+        with self._db() as db:
+            marcas = ",".join("?" * len(uids))
+            return {r["id"]: r["usuario"] for r in db.execute(
+                f"SELECT id, usuario FROM usuarios WHERE id IN ({marcas})", list(uids))}
+
+    # ----- historico -----
+    def registrar(self, autor: Usuario | None, acao: str, detalhe: str = "") -> None:
+        with self._db() as db:
+            db.execute("INSERT INTO auditoria (quando, autor, acao, detalhe) VALUES (?, ?, ?, ?)",
+                       (time.time(), autor.usuario if autor else "sistema", acao, detalhe[:2000]))
+            db.execute("DELETE FROM auditoria WHERE id <= (SELECT MAX(id) FROM auditoria) - ?", (AUDITORIA_MAX,))
+
+    def historico(self, limite: int = 200) -> list[dict]:
+        with self._db() as db:
+            return [dict(r) for r in db.execute(
+                "SELECT quando, autor, acao, detalhe FROM auditoria ORDER BY id DESC LIMIT ?",
+                (max(1, min(limite, 1000)),))]
 
     def acessos(self, uid: int) -> set[str]:
         with self._db() as db:
