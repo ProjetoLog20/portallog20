@@ -76,7 +76,9 @@ repositórios privados: [docs/instalar-em-uma-vm.md](docs/instalar-em-uma-vm.md)
    **Instalar e iniciar**: o portal clona o repositório da solução, constrói e sobe.
    Depois teste `http://IP-DA-VM:8101` numa janela anônima.
 
-Para atualizar: **o portal** com `git pull && docker compose up -d --build` na pasta dele;
+Para atualizar: **o portal** com `git pull && docker compose up -d --build && docker compose restart portal`
+na pasta dele (o código entra no container por uma pasta montada, então é o `restart` que
+carrega a versão nova);
 **uma solução** com o botão **Atualizar** (busca o último commit do branch e reconstrói).
 
 ### Instalação manual

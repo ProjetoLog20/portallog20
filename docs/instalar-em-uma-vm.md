@@ -64,7 +64,8 @@ No navegador de qualquer computador que enxergue a VM:
 
 ## Atualizar depois
 
-- **Portal:** na pasta `portal-solucoes-log20`, `git pull` e `sudo docker compose up -d --build`.
+- **Portal:** na pasta `portal-solucoes-log20`, `git pull`, `sudo docker compose up -d --build` e
+  `sudo docker compose restart portal` (o `restart` é o que carrega o código novo).
 - **Uma solução:** no portal, botão **Atualizar** (busca o último commit e reconstrói).
 
 ## Problemas comuns

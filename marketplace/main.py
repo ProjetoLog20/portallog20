@@ -146,8 +146,14 @@ def _definir_cookie(resp: Response, token: str) -> None:
 # ---------------- paginas ----------------
 
 @app.get("/", include_in_schema=False)
-def index() -> FileResponse:
-    return FileResponse(PASTA_WEB / "index.html")
+def index() -> HTMLResponse:
+    """Pagina inicial com ?v=<data do arquivo> no CSS e no JS: depois de um `git pull`, o
+    navegador baixa a versao nova em vez de usar a guardada em cache."""
+    pagina = (PASTA_WEB / "index.html").read_text(encoding="utf-8")
+    for nome in ("style.css", "app.js"):
+        versao = int((PASTA_WEB / nome).stat().st_mtime)
+        pagina = pagina.replace(f"/static/{nome}", f"/static/{nome}?v={versao}")
+    return HTMLResponse(pagina, headers={"Cache-Control": "no-cache"})
 
 
 # ---------------- autenticacao ----------------
