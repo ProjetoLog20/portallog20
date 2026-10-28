@@ -70,7 +70,14 @@ padrao = "gpt-5-mini"
 nome = "DATABASE_URL"
 rotulo = "Banco PostgreSQL (opcional)"
 tipo = "segredo"
-ajuda = "Em branco usa SQLite local. Para Supabase, cole a connection string e rode as migrations antes."
+ajuda = "Em branco usa SQLite local. No Supabase, use a string do Session pooler (Connect > Session pooler) e rode as migrations antes."
+
+[[configuracoes]]
+nome = "DATABASE_SSL_REJECT_UNAUTHORIZED"
+rotulo = "Exigir certificado SSL reconhecido no banco"
+tipo = "booleano"
+padrao = "false"
+ajuda = "Deixe desmarcado para o Supabase: o certificado dele é assinado pela própria autoridade do Supabase. A conexão continua criptografada."
 
 [[acessos_demo]]
 perfil = "Administrador"
