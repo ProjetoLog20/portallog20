@@ -174,10 +174,10 @@ use `http://<ip>:9101` como endereço público. As portas 8101/8102 ficam só em
 
 1. A solução precisa de um repositório Git com um `Dockerfile` que suba a aplicação numa
    porta HTTP e, de preferência, com uma rota de saúde (ex.: `/api/health`).
-2. No repositório do portal, crie `solucoes/<id>/solucao.toml` copiando o da Central do
-   Colaborador e ajuste `id`, `nome`, `[build].repositorio`, `porta_container`,
-   `porta_host` (única, dentro da faixa 8101-8130) e `caminho_saude`. Campos soltos (como
-   `segredos`) devem vir antes da primeira `[tabela]`. Faça commit e push.
+2. No repositório do portal, copie o modelo comentado `modelos/solucao/` para
+   `solucoes/<id>/` e troque as linhas marcadas com `<<TROCAR>>` (requisitos e exemplos de
+   Dockerfile em [`modelos/LEIA-ME.md`](modelos/LEIA-ME.md)). Confira com
+   `python -m marketplace validar` e faça commit e push.
 3. No servidor, na pasta do portal: `git pull`.
 4. No portal: **Soluções → Recarregar catálogo**. O portal gera a configuração do Caddy,
    valida e aplica sozinho; a porta nova passa a responder na hora.

@@ -1,0 +1,149 @@
+# =============================================================================
+# MODELO DE MANIFESTO - Portal de Solucoes LOG20
+# =============================================================================
+# Como usar:
+#   1. Copie esta pasta para solucoes/<id-da-solucao>/  (ex.: solucoes/controle-frota/)
+#   2. Troque os valores das linhas marcadas com  # <<TROCAR>>  (a marca pode ser apagada junto)
+#      e apague as linhas opcionais que nao usar.
+#   3. Commit + push; no servidor: git pull e, no portal, Solucoes > Recarregar catalogo.
+#
+# Regras do formato (TOML):
+#   - Campos soltos (id, nome, segredos, logo...) ficam ANTES da primeira [tabela].
+#     Um campo escrito depois de [execucao.volumes], por exemplo, passa a fazer parte dela.
+#   - Textos entre aspas; numeros sem aspas; listas entre colchetes.
+# Campos marcados (obrigatorio) precisam existir; o resto tem valor padrao.
+# =============================================================================
+
+
+# ----------------------------------------------------------------------------
+# Identificacao (aparece em "Meus sistemas" e em "Solucoes")
+# ----------------------------------------------------------------------------
+
+# (obrigatorio) Identificador unico: letras minusculas, numeros e hifens (2 a 41 caracteres).
+# Vira o nome do container (log20-<id>) e dos volumes de dados. Nao troque depois de instalar:
+# com id novo o portal trata como outra solucao (dados e permissoes nao vem junto).
+id = "nova-solucao"  # <<TROCAR>>
+
+# (obrigatorio) Nome mostrado para as pessoas.
+nome = "Nome da Solução"  # <<TROCAR>>
+
+# Uma frase sobre o que o sistema faz (aparece abaixo do nome).
+resumo = "O que a solução faz, em uma frase."  # <<TROCAR>>
+
+# Area da empresa (aparece abaixo do nome). Padrao: "Geral".
+categoria = "Operação"  # <<TROCAR>>
+
+versao = "1.0.0"
+responsavel = "LOG20"
+tags = []  # ex.: ["frota", "indicadores"]
+
+# Imagem quadrada (png, jpg, svg ou webp) DENTRO desta pasta. Sem logo, o portal mostra
+# um monograma com as iniciais do nome. Apague a linha se nao tiver logo.
+# logo = "logo.png"
+
+# Variaveis geradas automaticamente na primeira instalacao (valor aleatorio e longo) e
+# guardadas pelo portal; nunca aparecem na tela. Use para chaves de sessao/JWT da aplicacao.
+segredos = []  # ex.: ["JWT_SECRET", "SESSION_SECRET"]
+
+# Texto mais longo, mostrado na pagina da solucao. Linha em branco separa paragrafos.
+descricao = """
+Descreva para que serve o sistema, quem usa e o que a pessoa encontra ao entrar.
+
+Se guardar dados, diga onde (ex.: SQLite em volume local ou banco PostgreSQL externo).
+"""
+
+
+# ----------------------------------------------------------------------------
+# De onde vem o codigo
+# ----------------------------------------------------------------------------
+[build]
+# (obrigatorio) Repositorio Git por HTTPS, sem usuario/senha na URL.
+# Repositorio privado: o token de leitura do servidor (PORTAL_GIT_TOKEN) precisa incluir este repo.
+repositorio = "https://github.com/JungGustavo/NOME-DO-REPOSITORIO.git"  # <<TROCAR>>
+
+# Branch ou tag usado em "Instalar" e "Atualizar". Padrao: "main".
+ref = "main"
+
+# Pasta dentro do repositorio onde fica o Dockerfile (para repositorios com varios projetos).
+# Padrao: a raiz do repositorio.
+# subpasta = "backend"
+
+# Nome do Dockerfile dentro da subpasta. Padrao: "Dockerfile".
+# dockerfile = "Dockerfile"
+
+# Nome da imagem Docker. Padrao: "log20/<id>:local".
+# Duas solucoes com o mesmo nome de imagem compartilham o build (ex.: principal + homologacao).
+# imagem = "log20/nova-solucao:local"
+
+
+# ----------------------------------------------------------------------------
+# Como a solucao roda
+# ----------------------------------------------------------------------------
+[execucao]
+# (obrigatorio) Porta em que a aplicacao escuta DENTRO do container (a do EXPOSE/servidor HTTP).
+porta_container = 8080  # <<TROCAR>>
+
+# (obrigatorio) Porta publica da solucao no servidor. Unica entre as solucoes e dentro da
+# faixa do Caddy (8101-8130). Em uso hoje: 8101 (Central), 8102 (Homologacao).
+porta_host = 8103  # <<TROCAR>>
+
+# Rota que responde 2xx quando a aplicacao esta pronta. Padrao: "/".
+# Se a imagem tiver HEALTHCHECK no Dockerfile, o portal usa o do Docker.
+caminho_saude = "/health"  # <<TROCAR>>
+
+# Rota aberta pelo botao "Acessar". Padrao: "/".
+caminho_abrir = "/"
+
+# Variaveis de ambiente fixas da aplicacao. Valores sempre entre aspas.
+# {url} vira o endereco publico da solucao (ex.: http://192.168.0.10:8103), util para CORS,
+# links em e-mails ou callbacks de login.
+[execucao.ambiente]
+# APP_URL = "{url}"
+# TZ = "America/Sao_Paulo"
+
+# Pastas do container que precisam sobreviver a "Atualizar", "Reiniciar" e "Remover container".
+# Formato: apelido = "/caminho/absoluto/no/container". Vira o volume log20-<id>-<apelido>.
+# Sem volumes, tudo o que a aplicacao gravar no disco se perde ao atualizar.
+[execucao.volumes]
+# dados = "/app/data"
+# uploads = "/app/uploads"
+
+
+# ----------------------------------------------------------------------------
+# Configuracoes editaveis pelo administrador (Solucoes > Gerenciar > Configuracoes)
+# ----------------------------------------------------------------------------
+# Viram variaveis de ambiente no proximo inicio. Tipos:
+#   "texto"    -> campo de texto (valor aparece na tela)
+#   "segredo"  -> senha/chave: nunca volta para a tela; em branco mantem o valor salvo
+#   "booleano" -> caixa de marcar; vira "true" ou "false"
+# Copie o bloco quantas vezes precisar. Apague todos se a solucao nao tiver configuracoes.
+
+[[configuracoes]]
+# nome = nome da variavel de ambiente que a aplicacao le
+nome = "EXEMPLO_LIGAR_RECURSO"  # <<TROCAR>>
+rotulo = "Ligar recurso X"
+tipo = "booleano"
+padrao = "false"
+ajuda = "Explique em uma frase o que muda quando esta opção está ligada."
+
+# [[configuracoes]]
+# nome = "API_KEY_SERVICO"
+# rotulo = "Chave da API do serviço"
+# tipo = "segredo"
+# ajuda = "Necessária só se ..."
+
+# [[configuracoes]]
+# nome = "DATABASE_URL"
+# rotulo = "Banco PostgreSQL (opcional)"
+# tipo = "segredo"
+# ajuda = "Em branco usa o banco local."
+
+
+# ----------------------------------------------------------------------------
+# Usuarios de teste da PROPRIA aplicacao (mostrados so ao administrador do portal)
+# ----------------------------------------------------------------------------
+# Apague se a aplicacao nao tiver login proprio ou usuarios de demonstracao.
+# [[acessos_demo]]
+# perfil = "Administrador"
+# usuario = "admin"
+# senha = "troque-no-primeiro-acesso"

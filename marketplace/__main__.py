@@ -2,6 +2,7 @@
 
     python -m marketplace                 inicia o portal (http://localhost:8000)
     python -m marketplace criar-admin     cria um administrador
+    python -m marketplace validar         confere os manifestos em solucoes/ sem subir nada
 """
 
 from __future__ import annotations
@@ -37,6 +38,42 @@ def criar_admin(args: argparse.Namespace) -> int:
         return 1
     print(f"Administrador '{u.usuario}' criado. Entre no portal com esse usuario.")
     return 0
+
+
+FAIXA_PADRAO = "8101-8130"  # a mesma do docker-compose.yml
+
+
+def validar(_: argparse.Namespace) -> int:
+    """Confere os manifestos: erros impedem a publicacao; avisos sao lembretes."""
+    from pathlib import Path
+
+    from .catalog import carregar_catalogo
+
+    cfg = config_mod.carregar()
+    faixa = cfg.faixa_portas or config_mod._faixa(FAIXA_PADRAO)
+    solucoes, erros = carregar_catalogo(cfg.pasta_solucoes)
+    avisos: list[str] = []
+    for sol in solucoes.values():
+        texto = Path(sol.manifesto).read_text(encoding="utf-8")
+        if not faixa[0] <= sol.porta_host <= faixa[1]:
+            erros.append(f"{sol.manifesto}: porta_host {sol.porta_host} fora da faixa {faixa[0]}-{faixa[1]}")
+        if "<<TROCAR>>" in texto:
+            avisos.append(f"{sol.manifesto}: ainda ha marcas <<TROCAR>> (confira se trocou os valores)")
+        if sol.repositorio and "NOME-DO-REPOSITORIO" in sol.repositorio:
+            erros.append(f"{sol.manifesto}: troque o endereco do repositorio do modelo")
+        if sol.id == "nova-solucao":
+            avisos.append(f"{sol.manifesto}: o id ainda e o do modelo ('nova-solucao')")
+        if sol.caminho_saude == "/":
+            avisos.append(f"{sol.manifesto}: sem caminho_saude especifico; o portal vai testar '/'")
+    for msg in erros:
+        print(f"ERRO   {msg}")
+    for msg in avisos:
+        print(f"AVISO  {msg}")
+    print(f"\n{len(solucoes)} solucao(oes) lida(s), {len(erros)} erro(s), {len(avisos)} aviso(s).")
+    for sol in sorted(solucoes.values(), key=lambda s: s.porta_host):
+        origem = f"{sol.repositorio} ({sol.ref})" if sol.repositorio else str(sol.contexto_build)
+        print(f"  {sol.porta_host}  {sol.id:<34} {origem}")
+    return 1 if erros else 0
 
 
 class SemConsultasRotineiras(logging.Filter):
@@ -95,8 +132,13 @@ def main() -> None:
     p_admin = sub.add_parser("criar-admin", help="Cria um usuario administrador")
     p_admin.add_argument("--usuario")
     p_admin.add_argument("--nome")
+    sub.add_parser("validar", help="Confere os manifestos das solucoes")
     args = parser.parse_args()
-    sys.exit(criar_admin(args) if args.comando == "criar-admin" else servir(args))
+    if args.comando == "criar-admin":
+        sys.exit(criar_admin(args))
+    if args.comando == "validar":
+        sys.exit(validar(args))
+    sys.exit(servir(args))
 
 
 if __name__ == "__main__":
