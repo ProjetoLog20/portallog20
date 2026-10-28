@@ -52,7 +52,7 @@ def _atualizar_proxy(solucoes) -> dict | None:
     if not CFG.caddy_container:
         return None
     try:
-        r = proxy.aplicar(proxy.gerar(solucoes, CFG.portal_upstream), CFG.caddy_pasta, CFG.caddy_container)
+        r = proxy.aplicar(proxy.gerar(solucoes, CFG.portal_upstream, COOKIE), CFG.caddy_pasta, CFG.caddy_container)
     except Exception as exc:  # noqa: BLE001 - o portal continua no ar mesmo se o Caddy falhar
         r = proxy.Resultado(False, f"Falha ao atualizar o Caddy: {exc}", erro=True)
     print(f"[caddy] {r.mensagem}", flush=True)

@@ -44,7 +44,18 @@ class Resultado:
     erro: bool = False
 
 
-def gerar(solucoes: list[Solucao], portal_upstream: str) -> str:
+def filtro_cookie(nome_cookie: str) -> str:
+    """Expressao que tira um cookie do cabecalho Cookie sem mexer nos outros.
+
+    "a=1; portal_sessao=X; b=2" -> "a=1; b=2". Sem barras invertidas, para nao depender
+    das regras de escape do Caddyfile.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", nome_cookie):
+        raise ValueError(f"Nome de cookie invalido: {nome_cookie}")
+    return f"(^|; *){nome_cookie}=[^;]*;? *"
+
+
+def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "portal_sessao") -> str:
     """Monta o Caddyfile. A saida e deterministica (mesma entrada, mesmo texto)."""
     porta_portal = portal_upstream.rsplit(":", 1)[-1] if ":" in portal_upstream else "8000"
     pagina = _PAGINA_FORA_DO_AR.replace("PORTA_PORTAL", porta_portal)
@@ -58,7 +69,12 @@ def gerar(solucoes: list[Solucao], portal_upstream: str) -> str:
         "\t\turi /api/auth/verificar?solucao={args[0]}",
         "\t\tcopy_headers X-Portal-Usuario",
         "\t}",
-        "\treverse_proxy {args[1]}",
+        "\treverse_proxy {args[1]} {",
+        "\t\t# A sessao do portal nao vai para as solucoes: todas ficam no mesmo endereco",
+        "\t\t# (muda so a porta) e o navegador envia o cookie para todas. Sem isto, uma",
+        "\t\t# solucao poderia usar a sessao de quem a abriu para agir no portal.",
+        f'\t\theader_up Cookie "{filtro_cookie(cookie_portal)}" "$1"',
+        "\t}",
         "",
         "\thandle_errors {",
         '\t\theader Content-Type "text/html; charset=utf-8"',

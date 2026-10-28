@@ -19,7 +19,10 @@
 		uri /api/auth/verificar?solucao=central-colaborador
 		copy_headers X-Portal-Usuario
 	}
-	reverse_proxy 127.0.0.1:8101
+	reverse_proxy 127.0.0.1:8101 {
+		# Nao repassa a sessao do portal para a solucao.
+		header_up Cookie "(^|; *)portal_sessao=[^;]*;? *" "$1"
+	}
 }
 
 :9102 {
@@ -27,5 +30,8 @@
 		uri /api/auth/verificar?solucao=central-colaborador-homologacao
 		copy_headers X-Portal-Usuario
 	}
-	reverse_proxy 127.0.0.1:8102
+	reverse_proxy 127.0.0.1:8102 {
+		# Nao repassa a sessao do portal para a solucao.
+		header_up Cookie "(^|; *)portal_sessao=[^;]*;? *" "$1"
+	}
 }
