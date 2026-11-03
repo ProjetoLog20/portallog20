@@ -95,8 +95,47 @@ rotulo = "Remetente"
 tipo = "texto"
 padrao = "Jornada da Liderança <noreply@log20.com.br>"
 
+# Banco: em branco usa o SQLite do volume. Para PostgreSQL, preencha os campos abaixo OU a
+# string de conexao (se a string estiver preenchida, ela vale no lugar dos campos).
+[[configuracoes]]
+nome = "DB_HOST"
+rotulo = "Banco PostgreSQL: servidor"
+tipo = "texto"
+ajuda = "Em branco usa o SQLite local. Supabase: o host do Session pooler, ex.: aws-0-sa-east-1.pooler.supabase.com. Dados do SQLite não vão para o banco novo."
+
+[[configuracoes]]
+nome = "DB_PORT"
+rotulo = "Banco PostgreSQL: porta"
+tipo = "texto"
+padrao = "5432"
+
+[[configuracoes]]
+nome = "DB_NAME"
+rotulo = "Banco PostgreSQL: nome do banco"
+tipo = "texto"
+padrao = "postgres"
+
+[[configuracoes]]
+nome = "DB_USER"
+rotulo = "Banco PostgreSQL: usuário"
+tipo = "texto"
+ajuda = "No pooler do Supabase o usuário vem com o código do projeto: postgres.xxxxxxxx."
+
+[[configuracoes]]
+nome = "DB_PASSWORD"
+rotulo = "Banco PostgreSQL: senha"
+tipo = "segredo"
+ajuda = "Pode ter qualquer símbolo: não precisa codificar."
+
+[[configuracoes]]
+nome = "DB_SSLMODE"
+rotulo = "Banco PostgreSQL: SSL"
+tipo = "texto"
+padrao = "require"
+ajuda = "require para Supabase e bancos na nuvem; disable para um PostgreSQL local sem SSL."
+
 [[configuracoes]]
 nome = "DATABASE_URL"
-rotulo = "Banco PostgreSQL (opcional)"
+rotulo = "Banco PostgreSQL: string de conexão (alternativa)"
 tipo = "segredo"
-ajuda = "Em branco usa o SQLite do volume. Para trocar de banco, siga a migração descrita no README do projeto."
+ajuda = "Opcional, no lugar dos campos acima: postgresql://usuario:senha@servidor:5432/banco?sslmode=require. Símbolos na senha precisam ser codificados (# vira %23)."
