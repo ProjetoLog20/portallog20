@@ -16,6 +16,7 @@ TIPOS_CONFIG = {"texto", "segredo", "booleano"}
 EXTENSOES_LOGO = {".png", ".jpg", ".jpeg", ".svg", ".webp"}
 # Repositorio por HTTPS, sem usuario/senha na URL (o token vai em PORTAL_GIT_TOKEN).
 REPO_RE = re.compile(r"^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._~/-]+$")
+PUBLICO_RE = re.compile(r"^/[A-Za-z0-9._~/-]*\*?$")
 REF_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,99}$")
 
 
@@ -67,6 +68,8 @@ class Solucao:
     repositorio: str = ""
     ref: str = ""
     subpasta: str = "."
+    # Caminhos que abrem SEM login no portal (ex.: links publicos enviados por e-mail).
+    caminhos_publicos: list[str] = field(default_factory=list)
 
     @property
     def container(self) -> str:
@@ -136,6 +139,14 @@ def carregar_manifesto(caminho: Path) -> Solucao:
                 f"{caminho}: volume '{chave}' deve ser um caminho absoluto do container "
                 "(campos soltos depois de [execucao.volumes] entram nessa tabela; mova-os para o topo)"
             )
+    publicos = execucao.get("caminhos_publicos", [])
+    if not isinstance(publicos, list) or not all(isinstance(c, str) and PUBLICO_RE.match(c) for c in publicos):
+        raise ManifestoInvalido(
+            f"{caminho}: caminhos_publicos deve ser uma lista como [\"/links/*\"]: caminhos que comecam "
+            "com /, sem espacos, com * apenas no fim"
+        )
+    if any(c in ("/", "/*") for c in publicos):
+        raise ManifestoInvalido(f"{caminho}: caminhos_publicos nao pode liberar o sistema inteiro ('/' ou '/*')")
     for chave, valor in execucao.get("ambiente", {}).items():
         if isinstance(valor, (dict, list)):
             raise ManifestoInvalido(f"{caminho}: variavel de ambiente '{chave}' deve ser texto")
@@ -187,6 +198,7 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         repositorio=repositorio,
         ref=ref if repositorio else "",
         subpasta=subpasta,
+        caminhos_publicos=list(publicos),
     )
 
 

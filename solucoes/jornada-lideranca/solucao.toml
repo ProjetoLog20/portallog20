@@ -30,6 +30,10 @@ porta_container = 8000
 porta_host = 8103
 caminho_saude = "/saude/"
 caminho_abrir = "/"
+# Abrem sem login no portal: os links individuais de autoavaliacao que o RH envia aos
+# colaboradores e os estilos da pagina. O resto exige login no portal e acesso liberado.
+# (/autoavaliacao/minha/ e /exportar/ continuam exigindo o login do proprio sistema.)
+caminhos_publicos = ["/autoavaliacao/*", "/static/*"]
 
 [execucao.ambiente]
 DEBUG = "False"

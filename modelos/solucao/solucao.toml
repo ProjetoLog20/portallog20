@@ -94,6 +94,11 @@ caminho_saude = "/health"  # <<TROCAR>>
 # Rota aberta pelo botao "Acessar". Padrao: "/".
 caminho_abrir = "/"
 
+# Caminhos que abrem SEM login no portal, para links publicos que a solucao envia (ex.: um
+# formulario por e-mail). Use * so no fim; "/" e "/*" sao recusados. A propria solucao continua
+# responsavel por proteger essas paginas. Apague a linha se nao precisar.
+# caminhos_publicos = ["/formulario/*", "/static/*"]
+
 # Variaveis de ambiente fixas da aplicacao. Valores sempre entre aspas.
 # {url} vira o endereco publico da solucao (ex.: http://192.168.0.10:8103) e {host} so o nome ou IP
 # (ex.: 192.168.0.10, para ALLOWED_HOSTS do Django). {url} e util para CORS,

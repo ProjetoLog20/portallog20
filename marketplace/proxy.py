@@ -86,14 +86,50 @@ def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "p
         "}",
     ]
     for sol in sorted(solucoes, key=lambda s: s.porta_host):
-        linhas += [
-            "",
-            f"# {_comentario(sol.nome)}",
-            f":{sol.porta_host} {{",
-            f"\timport solucao {sol.id} {sol.container}:{sol.porta_container}",
-            "}",
-        ]
+        upstream = f"{sol.container}:{sol.porta_container}"
+        linhas += ["", f"# {_comentario(sol.nome)}", f":{sol.porta_host} {{"]
+        if not sol.caminhos_publicos:
+            linhas.append(f"\timport solucao {sol.id} {upstream}")
+        else:
+            linhas += _bloco_com_publicos(sol, upstream, portal_upstream, cookie_portal, pagina)
+        linhas.append("}")
     return "\n".join(linhas) + "\n"
+
+
+def _bloco_com_publicos(sol: Solucao, upstream: str, portal_upstream: str, cookie: str,
+                        pagina: str) -> list[str]:
+    """Site em que alguns caminhos abrem sem login no portal (links publicos da solucao).
+
+    Escrito por extenso, sem snippets aninhados. Nos caminhos publicos o cabecalho
+    X-Portal-Usuario e removido: sem ele, ninguem consegue se passar por um usuario do portal.
+    """
+    filtro = f'\t\t\theader_up Cookie "{filtro_cookie(cookie)}" "$1"'
+    return [
+        "\t# Caminhos publicos (manifesto: caminhos_publicos): sem login no portal.",
+        f"\t@publico path {' '.join(sol.caminhos_publicos)}",
+        "\thandle @publico {",
+        f"\t\treverse_proxy {upstream} {{",
+        "\t\t\theader_up -X-Portal-Usuario",
+        filtro,
+        "\t\t}",
+        "\t}",
+        "\thandle {",
+        f"\t\tforward_auth {portal_upstream} {{",
+        f"\t\t\turi /api/auth/verificar?solucao={sol.id}",
+        "\t\t\tcopy_headers X-Portal-Usuario",
+        "\t\t}",
+        f"\t\treverse_proxy {upstream} {{",
+        filtro,
+        "\t\t}",
+        "\t}",
+        "\thandle_errors {",
+        '\t\theader Content-Type "text/html; charset=utf-8"',
+        '\t\theader Cache-Control "no-store"',
+        "\t\trespond <<HTML",
+        f"\t\t\t{pagina}",
+        "\t\t\tHTML 503",
+        "\t}",
+    ]
 
 
 def _comentario(texto: str) -> str:
