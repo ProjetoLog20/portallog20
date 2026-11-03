@@ -14,8 +14,8 @@ Registro do ciclo de desenvolvimento das lideranças da LOG20. O RH cadastra fil
 colaboradores e ciclos; os líderes registram avaliação, feedback, PDI e check-in; o painel do RH
 acompanha o andamento e exporta os dados.
 
-Tem login próprio (e-mail e senha). O primeiro usuário do RH é criado pelo terminal da VM:
-docker exec -it log20-jornada-lideranca python manage.py criar_usuario --email rh@log20.com.br --nome "Pessoa do RH" --perfil rh
+Tem login próprio (e-mail e senha). A primeira conta do RH é criada ao iniciar, com o e-mail,
+o nome e a senha preenchidos em Configurações. As demais contas são criadas dentro do sistema.
 
 Os dados ficam em SQLite, num volume mantido ao atualizar ou reiniciar.
 """
@@ -53,6 +53,25 @@ CSRF_COOKIE_NAME = "jornada_csrf"
 
 [execucao.volumes]
 dados = "/app/data"
+
+# Primeira conta do RH: criada sozinha ao iniciar, se ainda nao existir (a senha nao e
+# sobrescrita depois). Dispensa o comando criar_usuario no terminal.
+[[configuracoes]]
+nome = "JORNADA_RH_EMAIL"
+rotulo = "Primeira conta do RH: e-mail"
+tipo = "texto"
+ajuda = "Criada no próximo início se ainda não existir. Depois de criada, mudar estes campos não altera a conta."
+
+[[configuracoes]]
+nome = "JORNADA_RH_NOME"
+rotulo = "Primeira conta do RH: nome"
+tipo = "texto"
+
+[[configuracoes]]
+nome = "JORNADA_RH_SENHA"
+rotulo = "Primeira conta do RH: senha"
+tipo = "segredo"
+ajuda = "Pelo menos 8 caracteres, sem ser só números nem parecida com o e-mail. Se for recusada, o motivo aparece nos logs."
 
 [[configuracoes]]
 nome = "LIDER_VE_AUTOAVALIACAO"

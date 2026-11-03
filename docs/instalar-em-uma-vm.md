@@ -64,9 +64,18 @@ No navegador de qualquer computador que enxergue a VM:
 
 ## Atualizar depois
 
-- **Portal:** na pasta `portal-solucoes-log20`, `git pull`, `sudo docker compose up -d --build` e
-  `sudo docker compose restart portal` (o `restart` é o que carrega o código novo).
-- **Uma solução:** no portal, botão **Atualizar** (busca o último commit e reconstrói).
+Na pasta `portal-solucoes-log20`:
+
+```bash
+bash deploy/atualizar.sh
+```
+
+Atualiza o portal, corrige o IP no `.env` se a VM ganhou outro, e instala ou reinicia as
+soluções (inclusive as que entraram no catálogo depois). Com `--atualizar-solucoes`, também
+reconstrói as soluções com o último código. Uma solução nova precisa estar no token de leitura
+da VM (peça ao dono dos repositórios).
+
+Para atualizar só **uma solução**: no portal, botão **Atualizar**.
 
 ## Problemas comuns
 

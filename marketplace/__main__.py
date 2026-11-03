@@ -3,6 +3,7 @@
     python -m marketplace                 inicia o portal (http://localhost:8000)
     python -m marketplace criar-admin     cria um administrador
     python -m marketplace validar         confere os manifestos em solucoes/ sem subir nada
+    python -m marketplace sincronizar     instala/inicia as solucoes do catalogo (ver --help)
 """
 
 from __future__ import annotations
@@ -133,7 +134,22 @@ def main() -> None:
     p_admin.add_argument("--usuario")
     p_admin.add_argument("--nome")
     sub.add_parser("validar", help="Confere os manifestos das solucoes")
+    p_sinc = sub.add_parser(
+        "sincronizar",
+        help="Instala e inicia as solucoes do catalogo (as paradas ficam paradas)",
+        description="Instala o que falta, reinicia o que esta com problema e regera o Caddy.",
+    )
+    p_sinc.add_argument("--atualizar", action="store_true",
+                        help="Reconstroi as solucoes com o ultimo commit do branch do manifesto")
+    p_sinc.add_argument("--reiniciar", action="store_true",
+                        help="Reinicia tambem as que estao no ar (ex.: depois de mudar o IP)")
+    p_sinc.add_argument("--incluir-paradas", action="store_true", help="Inicia tambem as paradas")
+    p_sinc.add_argument("solucoes", nargs="*", help="Ids das solucoes (padrao: todas)")
     args = parser.parse_args()
+    if args.comando == "sincronizar":
+        from .sincronizar import executar
+
+        sys.exit(executar(args.atualizar, args.reiniciar, args.incluir_paradas, args.solucoes))
     if args.comando == "criar-admin":
         sys.exit(criar_admin(args))
     if args.comando == "validar":

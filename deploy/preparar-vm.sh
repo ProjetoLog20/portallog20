@@ -118,6 +118,14 @@ if [ "${TEM_ADMIN:-0}" = "0" ]; then
   "${DOCKER[@]}" compose exec portal python -m marketplace criar-admin
 fi
 
+# ---------- solucoes ----------
+read -r -p "Instalar e iniciar agora as solucoes do catalogo? (leva alguns minutos) [S/n] " RESP
+if [[ ! "${RESP:-s}" =~ ^[nN] ]]; then
+  azul "Instalando as solucoes"
+  "${DOCKER[@]}" compose exec -T portal python -m marketplace sincronizar \
+    || aviso "Alguma solucao falhou (veja acima). Confira se o token de leitura inclui o repositorio dela."
+fi
+
 # ---------- pronto ----------
 azul "Pronto!"
 cat <<FIM
@@ -126,8 +134,10 @@ cat <<FIM
   Soluções:      http://$IP:8101, :8102...  (uma porta por solução, veja em Soluções)
 
   1. Abra o portal no navegador do seu computador e entre com o administrador.
-  2. Em Soluções, clique em "Instalar e iniciar" (o primeiro build leva alguns minutos).
-  3. Em Usuários, crie as pessoas e libere os sistemas de cada uma.
+  2. Em Soluções, confira as soluções (as que faltarem: "Instalar e iniciar").
+  3. Em Usuários, crie as pessoas (ou importe em lote) e libere os sistemas em Acessos.
+
+  Para atualizar depois (portal, IP e soluções novas): bash deploy/atualizar.sh
 
   As soluções só abrem para quem está logado no portal e tem acesso liberado.
 

@@ -76,10 +76,29 @@ repositórios privados: [docs/instalar-em-uma-vm.md](docs/instalar-em-uma-vm.md)
    **Instalar e iniciar**: o portal clona o repositório da solução, constrói e sobe.
    Depois teste `http://IP-DA-VM:8101` numa janela anônima.
 
-Para atualizar: **o portal** com `git pull && docker compose up -d --build && docker compose restart portal`
-na pasta dele (o código entra no container por uma pasta montada, então é o `restart` que
-carrega a versão nova);
-**uma solução** com o botão **Atualizar** (busca o último commit do branch e reconstrói).
+### Atualizar (um comando)
+
+Na pasta do portal, na VM:
+
+```bash
+bash deploy/atualizar.sh                       # portal + soluções novas ou com problema
+bash deploy/atualizar.sh --atualizar-solucoes  # também reconstrói as soluções com o último commit
+```
+
+O script:
+1. faz `git pull` do portal (e para, sem mexer em nada, se alguém alterou arquivos à mão na VM);
+2. confere o IP da VM e corrige o `.env` se ele mudou (só quando o `.env` usa IP, não domínio);
+3. sobe portal e Caddy e recria o portal, para carregar o código e o `.env` novos;
+4. roda `python -m marketplace sincronizar`: instala e inicia as soluções que faltam, reinicia as
+   que estão com problema (e todas, se o IP mudou) e regera o Caddy. Soluções paradas de
+   propósito continuam paradas.
+
+Uma solução nova só instala se o repositório dela estiver no token de leitura da VM. Para não
+precisar editar o token a cada repositório, crie o token com *Repository access → All
+repositories* (vale também para os repositórios criados depois; em troca, a VM lê todos os
+repositórios da conta).
+
+Também dá para atualizar **uma solução** pelo botão **Atualizar** no portal.
 
 ### Instalação manual
 
