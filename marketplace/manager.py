@@ -12,6 +12,7 @@ import urllib.request
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import docker_cli, fontes
 from .catalog import Solucao
@@ -145,7 +146,8 @@ class Gerenciador:
     # ---------- ambiente ----------
     def ambiente(self, sol: Solucao) -> dict[str, str]:
         url = self.url(sol)
-        env = {k: v.replace("{url}", url) for k, v in sol.ambiente.items()}
+        host = urlparse(url).hostname or ""
+        env = {k: v.replace("{url}", url).replace("{host}", host) for k, v in sol.ambiente.items()}
         for nome, valor in self.armazenamento.configuracoes(sol).items():
             if valor != "":
                 env[nome] = valor

@@ -95,7 +95,8 @@ caminho_saude = "/health"  # <<TROCAR>>
 caminho_abrir = "/"
 
 # Variaveis de ambiente fixas da aplicacao. Valores sempre entre aspas.
-# {url} vira o endereco publico da solucao (ex.: http://192.168.0.10:8103), util para CORS,
+# {url} vira o endereco publico da solucao (ex.: http://192.168.0.10:8103) e {host} so o nome ou IP
+# (ex.: 192.168.0.10, para ALLOWED_HOSTS do Django). {url} e util para CORS,
 # links em e-mails ou callbacks de login.
 [execucao.ambiente]
 # APP_URL = "{url}"

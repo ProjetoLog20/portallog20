@@ -1,0 +1,98 @@
+# Jornada da Liderança (Django). Codigo: fork JungGustavo/Jornada-da-lideranca, branch
+# portal-log20 (main fica igual ao original, para receber as atualizacoes com "Sync fork").
+
+id = "jornada-lideranca"
+nome = "Jornada da Liderança"
+resumo = "Ciclo de desenvolvimento das lideranças: avaliação, autoavaliação, feedback, PDI e check-in."
+categoria = "Recursos Humanos"
+versao = "1.0.0"
+responsavel = "RH LOG20"
+tags = ["rh", "lideranca", "django"]
+segredos = ["SECRET_KEY"]
+descricao = """
+Registro do ciclo de desenvolvimento das lideranças da LOG20. O RH cadastra filiais,
+colaboradores e ciclos; os líderes registram avaliação, feedback, PDI e check-in; o painel do RH
+acompanha o andamento e exporta os dados.
+
+Tem login próprio (e-mail e senha). O primeiro usuário do RH é criado pelo terminal da VM:
+docker exec -it log20-jornada-lideranca python manage.py criar_usuario --email rh@log20.com.br --nome "Pessoa do RH" --perfil rh
+
+Os dados ficam em SQLite, num volume mantido ao atualizar ou reiniciar.
+"""
+
+[build]
+repositorio = "https://github.com/JungGustavo/Jornada-da-lideranca.git"
+ref = "portal-log20"
+dockerfile = "Dockerfile"
+
+[execucao]
+porta_container = 8000
+porta_host = 8103
+caminho_saude = "/saude/"
+caminho_abrir = "/"
+
+[execucao.ambiente]
+DEBUG = "False"
+ALLOWED_HOSTS = "{host}"
+CSRF_TRUSTED_ORIGINS = "{url}"
+TZ = "America/Sao_Paulo"
+# Servido por http:// num IP. Com domínio e HTTPS, troque para True e ligue CONFIAR_PROXY_HTTPS.
+SECURE_SSL_REDIRECT = "False"
+SESSION_COOKIE_SECURE = "False"
+CSRF_COOKIE_SECURE = "False"
+SECURE_HSTS_SECONDS = "0"
+SECURE_HSTS_INCLUDE_SUBDOMAINS = "False"
+SECURE_HSTS_PRELOAD = "False"
+# Cookies com nome próprio: outros sistemas no mesmo IP (outras portas) recebem os mesmos cookies.
+SESSION_COOKIE_NAME = "jornada_sessao"
+CSRF_COOKIE_NAME = "jornada_csrf"
+
+[execucao.volumes]
+dados = "/app/data"
+
+[[configuracoes]]
+nome = "LIDER_VE_AUTOAVALIACAO"
+rotulo = "Líder vê a autoavaliação do colaborador"
+tipo = "booleano"
+padrao = "true"
+
+[[configuracoes]]
+nome = "EMAIL_BACKEND"
+rotulo = "Envio de e-mail"
+tipo = "texto"
+padrao = "django.core.mail.backends.console.EmailBackend"
+ajuda = "Padrão: os e-mails só aparecem nos logs. Para enviar de verdade, use django.core.mail.backends.smtp.EmailBackend e preencha o SMTP abaixo."
+
+[[configuracoes]]
+nome = "EMAIL_HOST"
+rotulo = "Servidor SMTP"
+tipo = "texto"
+ajuda = "Ex.: smtp.office365.com. Dados fornecidos pela TI."
+
+[[configuracoes]]
+nome = "EMAIL_PORT"
+rotulo = "Porta SMTP"
+tipo = "texto"
+padrao = "587"
+
+[[configuracoes]]
+nome = "EMAIL_HOST_USER"
+rotulo = "Usuário SMTP"
+tipo = "texto"
+
+[[configuracoes]]
+nome = "EMAIL_HOST_PASSWORD"
+rotulo = "Senha SMTP"
+tipo = "segredo"
+
+[[configuracoes]]
+nome = "DEFAULT_FROM_EMAIL"
+rotulo = "Remetente"
+tipo = "texto"
+padrao = "Jornada da Liderança <noreply@log20.com.br>"
+
+[[configuracoes]]
+nome = "DATABASE_URL"
+rotulo = "Banco PostgreSQL (opcional)"
+tipo = "segredo"
+ajuda = "Em branco usa o SQLite do volume. Para trocar de banco, siga a migração descrita no README do projeto."
