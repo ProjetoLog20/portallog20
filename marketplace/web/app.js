@@ -399,7 +399,8 @@ let filtroSolucoes = "todas";
 function botoesAcao(sol, aoAgir, soPrincipal = false) {
   const caixa = h("div", { class: "acoes-solucao" });
   if (sol.status.estado === "ocupado") {
-    caixa.append(h("button", { class: "botao", type: "button", disabled: true }, h("span", { class: "giro", "aria-hidden": "true" }), `${sol.status.detalhe}…`));
+    caixa.append(h("button", { class: "botao andamento", type: "button", disabled: true, title: sol.status.detalhe },
+      h("span", { class: "giro", "aria-hidden": "true" }), h("span", {}, "Aguarde…")));
     return caixa;
   }
   const acoes = ACOES_POR_ESTADO[sol.status.estado] || [];
