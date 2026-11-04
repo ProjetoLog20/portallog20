@@ -39,8 +39,9 @@ alguns minutos). Em **Usuários**, crie as pessoas e marque os sistemas de cada 
 
 ## Rodar no servidor ou numa VM (Docker Compose)
 
-No servidor tudo roda em Docker: o **portal** (porta 8000) e o **Caddy**, que é a única
-entrada das soluções (uma porta por solução, na faixa 8101-8130). As soluções ficam numa rede interna do Docker, sem
+No servidor tudo roda em Docker: o **portal** (porta 8000), o **Caddy**, que é a única
+entrada das soluções (uma porta por solução, na faixa 8101-8130), e um **PostgreSQL** para as
+soluções que precisam de banco. As soluções e o banco ficam numa rede interna do Docker, sem
 portas próprias, então só abrem para quem está logado no portal e tem acesso a elas.
 
 ```
@@ -215,6 +216,38 @@ joao.souza;João Souza;administrador
 - Segredos das soluções (`JWT_SECRET`, chaves de API) ficam em `dados/`, nunca são enviados
   ao navegador e não aparecem na linha de comando do `docker`.
 
+## Banco de dados do servidor (PostgreSQL)
+
+O serviço `postgres` do `docker-compose.yml` (container `log20-postgres`, volume
+`log20-postgres-dados`) atende as soluções cujo manifesto tem `[banco]`. Ao instalar ou
+iniciar uma delas, o portal:
+
+1. cria um **banco e um usuário só daquela solução** (ex.: banco `jornada_lideranca`, usuário
+   `app_jornada_lideranca`), com senha aleatória guardada em `dados/` e nunca mostrada na tela.
+   Os outros usuários do servidor não conectam nesse banco;
+2. na primeira vez, preenche as configurações de banco da solução (servidor, porta, banco,
+   usuário, senha), se elas ainda estiverem vazias ou no padrão.
+
+Depois disso o portal não mexe mais nessas configurações: para usar outro banco (ex.: Supabase),
+troque os campos em **Configurações** e clique em **Reiniciar**; o banco do servidor deixa de ser
+usado e nem precisa estar no ar. O banco fica só na rede interna (nenhuma porta aberta na
+máquina) e a conexão não usa SSL, porque não sai do servidor.
+
+A senha do administrador do banco (`PORTAL_POSTGRES_SENHA`) é gerada pelos scripts de deploy e
+fica só no `.env`; ninguém precisa digitá-la. **Faça backup do volume `log20-postgres-dados`**:
+se a VM se perder, os bancos vão junto.
+
+Comandos úteis, na pasta do portal:
+
+```bash
+sudo docker compose exec postgres psql -U postgres -c '\l'                  # bancos e donos
+sudo docker compose exec postgres psql -U postgres -d jornada_lideranca      # abrir um banco
+sudo docker compose exec postgres pg_dump -U postgres -Fc jornada_lideranca > jornada.dump
+```
+
+Remover uma solução do portal não apaga o banco dela. Para apagar (irreversível):
+`sudo docker compose exec postgres psql -U postgres -c 'DROP DATABASE jornada_lideranca'`.
+
 ## Publicar uma nova solução
 
 1. A solução precisa de um repositório Git com um `Dockerfile` que suba a aplicação numa
@@ -245,6 +278,7 @@ topo da tela de Soluções, e o acesso às soluções que já estavam no ar cont
 | `segredos` | Variáveis geradas automaticamente uma única vez |
 | `logo` | Imagem quadrada da solução (png, jpg, svg ou webp) dentro da pasta dela; sem logo, aparece um monograma |
 | `[[configuracoes]]` | Campos editáveis pelo admin (`texto`, `segredo` ou `booleano`) |
+| `[banco]` + `[banco.configuracoes]` | Banco no PostgreSQL do servidor: qual configuração recebe cada dado (`{db_host}`, `{db_porta}`, `{db_nome}`, `{db_usuario}`, `{db_senha}` ou `{db_url}`) |
 | `[[acessos_demo]]` | Usuários de teste exibidos ao admin |
 
 ## Comandos úteis

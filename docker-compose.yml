@@ -29,6 +29,9 @@ services:
       PORTAL_CADDY_CONTAINER: log20-caddy
       # Mesma faixa publicada pelo servico caddy abaixo; manifestos fora dela sao recusados.
       PORTAL_FAIXA_PORTAS: "8101-8130"
+      # Banco PostgreSQL do servidor: o portal cria um banco e um usuario por solucao que pedir
+      # ([banco] no manifesto), via "docker exec" neste container.
+      PORTAL_POSTGRES_CONTAINER: log20-postgres
     ports:
       - "8000:8000"
     networks:
@@ -64,9 +67,33 @@ services:
       - ./dados/caddy:/etc/caddy:ro
       - caddy-dados:/data
 
+  # Um PostgreSQL para as solucoes, so na rede interna (nenhuma porta aberta na maquina).
+  # Cada solucao tem banco e usuario proprios; um nao le os dados do outro.
+  # A senha do administrador do banco fica no .env (PORTAL_POSTGRES_SENHA, gerada pelos scripts)
+  # e so vale na primeira subida, quando o volume e criado.
+  postgres:
+    image: postgres:17
+    container_name: log20-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${PORTAL_POSTGRES_SENHA:?defina PORTAL_POSTGRES_SENHA no .env (os scripts de deploy geram)}
+      TZ: America/Sao_Paulo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - log20
+    volumes:
+      - postgres-dados:/var/lib/postgresql/data
+
 networks:
   log20:
     name: log20
 
 volumes:
   caddy-dados:
+  postgres-dados:
+    # Nome fixo: o backup e a restauracao acham o volume por ele.
+    name: log20-postgres-dados

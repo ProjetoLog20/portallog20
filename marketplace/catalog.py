@@ -70,6 +70,9 @@ class Solucao:
     subpasta: str = "."
     # Caminhos que abrem SEM login no portal (ex.: links publicos enviados por e-mail).
     caminhos_publicos: list[str] = field(default_factory=list)
+    # Banco no PostgreSQL do servidor: {configuracao: modelo com {db_host}, {db_senha}...}.
+    # O portal cria banco + usuario e preenche essas configuracoes (so as vazias, uma vez).
+    banco: dict[str, str] | None = None
 
     @property
     def container(self) -> str:
@@ -151,6 +154,26 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         if isinstance(valor, (dict, list)):
             raise ManifestoInvalido(f"{caminho}: variavel de ambiente '{chave}' deve ser texto")
 
+    banco = None
+    if "banco" in dados:
+        sec = dados["banco"]
+        if not isinstance(sec, dict) or sec.get("tipo", "postgres") != "postgres":
+            raise ManifestoInvalido(f"{caminho}: [banco] aceita apenas tipo = \"postgres\"")
+        mapa = sec.get("configuracoes", {})
+        if not isinstance(mapa, dict) or not mapa:
+            raise ManifestoInvalido(f"{caminho}: [banco.configuracoes] deve dizer qual configuracao recebe cada dado")
+        nomes_config = {str(i.get("nome")) for i in dados.get("configuracoes", [])}
+        for nome, modelo in mapa.items():
+            if nome not in nomes_config:
+                raise ManifestoInvalido(f"{caminho}: [banco.configuracoes] cita '{nome}', que nao esta em [[configuracoes]]")
+            sobra = re.sub(r"\{db_(host|porta|nome|usuario|senha|url)\}", "", str(modelo))
+            if "{" in sobra or "}" in sobra:
+                raise ManifestoInvalido(
+                    f"{caminho}: modelo invalido em [banco.configuracoes] {nome}; use {{db_host}}, {{db_porta}}, "
+                    "{db_nome}, {db_usuario}, {db_senha} ou {db_url}"
+                )
+        banco = {str(k): str(v) for k, v in mapa.items()}
+
     configuracoes = []
     for item in dados.get("configuracoes", []):
         tipo = item.get("tipo", "texto")
@@ -199,6 +222,7 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         ref=ref if repositorio else "",
         subpasta=subpasta,
         caminhos_publicos=list(publicos),
+        banco=banco,
     )
 
 

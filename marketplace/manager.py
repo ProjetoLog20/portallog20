@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
+from . import banco as banco_pg
 from . import docker_cli, fontes
 from .catalog import Solucao
 from .config import Config
@@ -116,6 +117,44 @@ class Armazenamento:
             dados = self.ler(sid)
             dados["url_publica"] = url
             self.gravar(sid, dados)
+
+    def banco(self, sid: str) -> dict | None:
+        """Banco no PostgreSQL do servidor criado para a solucao: {nome, usuario, senha, configurado}."""
+        return self.ler(sid).get("banco")
+
+    def banco_personalizado(self, sol: Solucao, campos) -> bool:
+        """True se algum campo do banco tem valor proprio (nem vazio, nem o padrao do manifesto)."""
+        padroes = {c.nome: c.padrao for c in sol.configuracoes}
+        salvos = self.ler(sol.id)["configuracoes"]
+        return any(salvos.get(n) not in (None, "", padroes.get(n, "")) for n in campos)
+
+    def banco_em_uso(self, sol: Solucao, esperado: dict[str, str]) -> bool:
+        """True se as configuracoes ainda sao as que o portal preencheu com o banco do servidor."""
+        salvos = self.ler(sol.id)["configuracoes"]
+        return all(salvos.get(n) == v for n, v in esperado.items())
+
+    def registrar_banco(self, sol: Solucao, cred, valores_config: dict[str, str]) -> list[str]:
+        """Guarda as credenciais e, na primeira vez, preenche as configuracoes do banco.
+
+        So preenche se o admin ainda nao apontou a solucao para outro banco (todas as
+        configuracoes do banco vazias ou com o valor padrao). Depois disso o portal nao mexe
+        mais nelas: se o admin trocar o servidor ou apagar os campos, a escolha dele fica.
+        Devolve os nomes preenchidos agora.
+        """
+        with self._lock:
+            dados = self.ler(sol.id)
+            anterior = dados.get("banco") or {}
+            preenchidas: list[str] = []
+            salvos = dados["configuracoes"]
+            if not anterior.get("configurado") and not self.banco_personalizado(sol, valores_config):
+                for nome, valor in valores_config.items():
+                    salvos[nome] = valor
+                    preenchidas.append(nome)
+            dados["banco"] = {"nome": cred.nome, "usuario": cred.usuario, "senha": cred.senha,
+                              "servidor": cred.host,
+                              "configurado": bool(anterior.get("configurado") or preenchidas)}
+            self.gravar(sol.id, dados)
+            return preenchidas
 
     def limpar_segredo(self, sol: Solucao, nome: str) -> None:
         with self._lock:
@@ -260,7 +299,34 @@ class Gerenciador:
                 if outra.imagem == sol.imagem:
                     self.armazenamento.registrar_versao(outra.id, info)
 
+    def _preparar_banco(self, sol: Solucao, tarefa: Tarefa) -> None:
+        """Garante o banco da solucao no PostgreSQL do servidor ([banco] no manifesto)."""
+        if not self.config.postgres_container:
+            tarefa.registrar("Banco: este portal nao tem PostgreSQL do servidor configurado; "
+                             "a solucao usa o banco das configuracoes (ou o local).")
+            return
+        guardado = self.armazenamento.banco(sol.id) or {}
+        # Com outro banco nas configuracoes (ex.: Supabase), o do servidor nao e usado nem exigido.
+        if guardado.get("configurado"):
+            anterior = banco_pg.Credenciais(host=guardado.get("servidor", self.config.postgres_container),
+                                            porta=banco_pg.PORTA, nome=guardado["nome"],
+                                            usuario=guardado["usuario"], senha=guardado["senha"])
+            if not self.armazenamento.banco_em_uso(sol, banco_pg.preencher(sol.banco, anterior)):
+                tarefa.registrar("Banco: as configuracoes apontam para outro banco; o banco do servidor nao e usado.")
+                return
+        elif self.armazenamento.banco_personalizado(sol, sol.banco):
+            tarefa.registrar("Banco: as configuracoes ja apontam para outro banco e foram mantidas.")
+            return
+        tarefa.etapa = "Preparando o banco de dados"
+        cred, _ = banco_pg.garantir(self.config.postgres_container, sol.id, guardado.get("senha"),
+                                    tarefa.registrar)
+        preenchidas = self.armazenamento.registrar_banco(sol, cred, banco_pg.preencher(sol.banco, cred))
+        if preenchidas:
+            tarefa.registrar(f"Banco: configuracoes preenchidas com o banco do servidor: {', '.join(preenchidas)}.")
+
     def _iniciar(self, sol: Solucao, tarefa: Tarefa) -> None:
+        if sol.banco:
+            self._preparar_banco(sol, tarefa)
         tarefa.etapa = "Iniciando container"
         # Recria o container para aplicar configuracoes novas; os volumes preservam os dados.
         docker_cli.remove(sol.container)

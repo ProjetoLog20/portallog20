@@ -47,6 +47,8 @@ class Config:
     portal_upstream: str
     # Faixa de portas publicada pelo Caddy (ex.: (8101, 8150)); None = sem restricao.
     faixa_portas: tuple[int, int] | None
+    # PostgreSQL do servidor (container na mesma rede das solucoes); vazio = sem banco gerenciado.
+    postgres_container: str = ""
 
 
 def carregar() -> Config:
@@ -69,6 +71,7 @@ def carregar() -> Config:
         caddy_pasta=Path(os.environ.get("PORTAL_CADDY_PASTA", RAIZ / "dados" / "caddy")),
         portal_upstream=os.environ.get("PORTAL_UPSTREAM", "portal:8000").strip(),
         faixa_portas=_faixa(os.environ.get("PORTAL_FAIXA_PORTAS", "")),
+        postgres_container=os.environ.get("PORTAL_POSTGRES_CONTAINER", "").strip(),
     )
 
 

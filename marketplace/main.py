@@ -345,6 +345,9 @@ def api_detalhe(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
         "url_publica": ger().armazenamento.url_publica(sol.id),
         "codigo": {"repositorio": sol.repositorio, "ref": sol.ref} if sol.repositorio else None,
         "versao_instalada": ger().armazenamento.versao_instalada(sol.id),
+        # Banco criado no PostgreSQL do servidor (sem a senha, que nunca sai do portal).
+        "banco": (lambda b: {"nome": b["nome"], "usuario": b["usuario"], "servidor": b.get("servidor", "")}
+                  if b else None)(ger().armazenamento.banco(sol.id)) if sol.banco else None,
         "url_padrao": f"{CFG.url_base}:{sol.porta_host}",
         "acessos_demo": [vars(a) for a in sol.acessos_demo],
         "configuracoes": [

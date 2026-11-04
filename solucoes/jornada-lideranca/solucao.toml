@@ -17,7 +17,8 @@ acompanha o andamento e exporta os dados.
 Tem login próprio (e-mail e senha). A primeira conta do RH é criada ao iniciar, com o e-mail,
 o nome e a senha preenchidos em Configurações. As demais contas são criadas dentro do sistema.
 
-Os dados ficam em SQLite, num volume mantido ao atualizar ou reiniciar.
+Os dados ficam no PostgreSQL do servidor, num banco só da Jornada (sem servidor de banco, num
+SQLite local). Os dois são mantidos ao atualizar ou reiniciar.
 """
 
 [build]
@@ -53,6 +54,21 @@ CSRF_COOKIE_NAME = "jornada_csrf"
 
 [execucao.volumes]
 dados = "/app/data"
+
+# Banco no PostgreSQL do servidor: na primeira instalacao o portal cria o banco e o usuario
+# da Jornada e preenche os campos DB_* abaixo (so se ainda estiverem no padrao). Para usar
+# outro banco (ex.: Supabase), troque os campos; o portal nao sobrescreve depois.
+[banco]
+tipo = "postgres"
+
+[banco.configuracoes]
+DB_HOST = "{db_host}"
+DB_PORT = "{db_porta}"
+DB_NAME = "{db_nome}"
+DB_USER = "{db_usuario}"
+DB_PASSWORD = "{db_senha}"
+# Rede interna do Docker: a conexao nao sai da maquina.
+DB_SSLMODE = "disable"
 
 # Primeira conta do RH: criada sozinha ao iniciar, se ainda nao existir (a senha nao e
 # sobrescrita depois). Dispensa o comando criar_usuario no terminal.
@@ -120,7 +136,7 @@ padrao = "Jornada da Liderança <noreply@log20.com.br>"
 nome = "DB_HOST"
 rotulo = "Banco PostgreSQL: servidor"
 tipo = "texto"
-ajuda = "Em branco usa o SQLite local. Supabase: o host do Session pooler, ex.: aws-0-sa-east-1.pooler.supabase.com. Dados do SQLite não vão para o banco novo."
+ajuda = "Preenchido pelo portal com o banco do servidor (log20-postgres). Para outro banco, troque aqui; ex.: Supabase, o host do Session pooler. Em branco, sem banco do servidor: SQLite local."
 
 [[configuracoes]]
 nome = "DB_PORT"

@@ -82,6 +82,21 @@ PY
   chmod 600 .env
 fi
 
+# Senha do administrador do PostgreSQL do servidor: gerada uma vez, guardada so no .env.
+garantir_senha_postgres() {
+  if ! grep -qE '^PORTAL_POSTGRES_SENHA=.+' .env; then
+    local senha
+    senha=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    if grep -q '^PORTAL_POSTGRES_SENHA=' .env; then
+      sed -i "s/^PORTAL_POSTGRES_SENHA=.*/PORTAL_POSTGRES_SENHA=$senha/" .env
+    else
+      printf '\n# Senha do administrador do PostgreSQL do servidor (gerada pelo deploy).\nPORTAL_POSTGRES_SENHA=%s\n' "$senha" >> .env
+    fi
+    echo "Senha do banco do servidor gerada e guardada no .env."
+  fi
+}
+garantir_senha_postgres
+
 # ---------- firewall ----------
 # Portas publicadas no docker-compose.yml: "8000:8000" e a faixa das solucoes "8101-8130:8101-8130".
 PORTAS=$(grep -oE '"[0-9]+(-[0-9]+)?:[0-9]+(-[0-9]+)?"' docker-compose.yml | tr -d '"' | cut -d: -f1 | sort -u)

@@ -13,6 +13,11 @@ PORTAL_URL_PUBLICA=http://192.168.0.10:8000
 # "Contents: Read-only" aos repositorios das solucoes. Deixe vazio se forem publicos.
 PORTAL_GIT_TOKEN=
 
+# Senha do administrador do PostgreSQL do servidor (servico "postgres" do docker-compose).
+# Os scripts de deploy geram uma aleatoria. Ninguem precisa digita-la: o portal cria o banco
+# de cada solucao sozinho. So vale na primeira subida do banco; trocar depois nao muda nada.
+PORTAL_POSTGRES_SENHA=
+
 # Duracao da sessao de login, em horas.
 PORTAL_SESSAO_HORAS=12
 

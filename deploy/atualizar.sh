@@ -9,7 +9,7 @@
 #   1. git pull do portal (para se houver arquivos alterados a mao nesta VM);
 #   2. confere o IP da VM e corrige PORTAL_URL_BASE/PORTAL_URL_PUBLICA no .env se mudou
 #      (so quando o .env usa um IP; com dominio, nao mexe);
-#   3. sobe portal + Caddy e recria o portal (carrega o codigo e o .env novos);
+#   3. sobe portal + Caddy + PostgreSQL e recria o portal (carrega o codigo e o .env novos);
 #   4. instala e inicia as solucoes que faltam, reinicia as com problema e regera o Caddy.
 #      Se o IP mudou, reinicia tambem as que estao no ar. Solucoes paradas ficam paradas.
 # Pode rodar quantas vezes quiser.
@@ -69,8 +69,23 @@ else
   echo "PORTAL_URL_BASE e '$BASE_ATUAL' (dominio ou personalizado): o IP nao foi conferido."
 fi
 
-# ---------- 3. portal + Caddy ----------
-azul "Subindo portal e Caddy"
+# Senha do administrador do PostgreSQL do servidor: gerada uma vez, guardada so no .env.
+garantir_senha_postgres() {
+  if ! grep -qE '^PORTAL_POSTGRES_SENHA=.+' .env; then
+    local senha
+    senha=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    if grep -q '^PORTAL_POSTGRES_SENHA=' .env; then
+      sed -i "s/^PORTAL_POSTGRES_SENHA=.*/PORTAL_POSTGRES_SENHA=$senha/" .env
+    else
+      printf '\n# Senha do administrador do PostgreSQL do servidor (gerada pelo deploy).\nPORTAL_POSTGRES_SENHA=%s\n' "$senha" >> .env
+    fi
+    echo "Senha do banco do servidor gerada e guardada no .env."
+  fi
+}
+
+# ---------- 3. portal, Caddy e banco ----------
+garantir_senha_postgres
+azul "Subindo portal, Caddy e banco"
 "${DOCKER[@]}" compose up -d --build --quiet-pull
 # O codigo do portal e montado no container: recriar e o que carrega o codigo e o .env novos.
 "${DOCKER[@]}" compose up -d --force-recreate --no-deps portal

@@ -115,6 +115,17 @@ caminho_abrir = "/"
 # uploads = "/app/uploads"
 
 
+# Banco no PostgreSQL do servidor (opcional). O portal cria um banco e um usuario so desta
+# solucao e, na primeira vez, preenche as configuracoes listadas abaixo (que precisam existir
+# em [[configuracoes]]). Modelos: {db_host} {db_porta} {db_nome} {db_usuario} {db_senha} e
+# {db_url} (postgresql://usuario:senha@servidor:5432/banco). Apague se nao usar.
+# [banco]
+# tipo = "postgres"
+#
+# [banco.configuracoes]
+# DATABASE_URL = "{db_url}"
+
+
 # ----------------------------------------------------------------------------
 # Configuracoes editaveis pelo administrador (Solucoes > Gerenciar > Configuracoes)
 # ----------------------------------------------------------------------------

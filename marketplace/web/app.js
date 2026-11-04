@@ -541,7 +541,8 @@ async function telaSolucao(id) {
   const instalada = vi ? `${vi.commit}: ${vi.resumo}${vi.data ? ` (${quando(Date.parse(vi.data) / 1000)})` : ""}` : "Ainda não instalada";
   const ficha = h("dl", { class: "ficha" },
     [["Endereço", h("a", { href: sol.url, target: "_blank", rel: "noopener" }, sol.url)], ["Versão", sol.versao], ["Responsável", sol.responsavel],
-     ["Código", repo], ["Instalado", instalada], ["Imagem", sol.imagem], ["Porta", String(sol.porta)]]
+     ["Código", repo], ["Instalado", instalada], ["Imagem", sol.imagem], ["Porta", String(sol.porta)],
+     ["Banco", sol.banco ? `${sol.banco.nome} no PostgreSQL do servidor (usuário ${sol.banco.usuario})` : ""]]
       .filter(([, v]) => v)
       .map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]));
 
