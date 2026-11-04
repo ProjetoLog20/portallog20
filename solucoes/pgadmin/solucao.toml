@@ -1,0 +1,57 @@
+# pgAdmin: administracao do PostgreSQL do servidor pelo navegador.
+# Fica atras do portal como qualquer solucao: so abre para quem esta logado e tem acesso.
+# Libere SO para quem administra os bancos (administradores do portal ja veem tudo).
+
+id = "pgadmin"
+nome = "pgAdmin (bancos de dados)"
+resumo = "Consultar e administrar o PostgreSQL do servidor pelo navegador."
+categoria = "Infraestrutura"
+versao = "9"
+responsavel = "TI LOG20"
+tags = ["banco", "postgres", "admin"]
+descricao = """
+pgAdmin já configurado com o PostgreSQL do servidor, onde ficam os bancos das soluções
+(por exemplo jornada_lideranca).
+
+Para entrar: o e-mail e a senha definidos em Configurações (login do próprio pgAdmin). Ao abrir o
+servidor "PostgreSQL do servidor", ele pede a senha do banco: a do usuário postgres está no .env
+da VM (PORTAL_POSTGRES_SENHA). Para só consultar uma solução, prefira o usuário dela
+(ex.: app_jornada_lideranca), que só enxerga o próprio banco.
+
+Quem acessa aqui pode ler e alterar os dados de todas as soluções: libere com cuidado.
+"""
+
+[build]
+# Imagem montada a partir da pasta imagem/ (pgAdmin oficial + servidor ja cadastrado).
+contexto = "imagem"
+imagem = "log20/pgadmin:local"
+
+[execucao]
+porta_container = 80
+porta_host = 8104
+caminho_saude = "/misc/ping"
+caminho_abrir = "/"
+
+[execucao.ambiente]
+# Sem senha-mestra extra para guardar senhas de conexao (o acesso ja passa pelo portal).
+PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED = "False"
+PGADMIN_DISABLE_POSTFIX = "True"
+TZ = "America/Sao_Paulo"
+
+[execucao.volumes]
+# Usuarios, preferencias e conexoes salvas do pgAdmin.
+dados = "/var/lib/pgadmin"
+
+[[configuracoes]]
+nome = "PGADMIN_DEFAULT_EMAIL"
+rotulo = "Login do pgAdmin: e-mail"
+tipo = "texto"
+padrao = "admin@log20.com.br"
+ajuda = "Usado só na primeira instalação, para criar o login do pgAdmin."
+
+[[configuracoes]]
+nome = "PGADMIN_DEFAULT_PASSWORD"
+rotulo = "Login do pgAdmin: senha"
+tipo = "segredo"
+obrigatoria = true
+ajuda = "Obrigatória antes de iniciar. Usada só na primeira instalação; depois, troque a senha dentro do pgAdmin."

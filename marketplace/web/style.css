@@ -263,6 +263,7 @@ code { font-family: var(--mono); font-size: .93em; }
   font: 600 11.5px/1.5 var(--corpo); background: var(--neutro-fundo); color: var(--neutro); vertical-align: 1px;
 }
 .etiqueta.admin { background: var(--petroleo-claro); color: var(--link); }
+.etiqueta.obrigatoria { background: var(--erro-fundo); color: var(--erro); }
 
 .docker { font-size: 13px; color: var(--suave); display: inline-flex; align-items: center; gap: 8px; }
 .docker::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--neutro); flex: none; }

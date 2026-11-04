@@ -133,6 +133,7 @@ caminho_abrir = "/"
 #   "texto"    -> campo de texto (valor aparece na tela)
 #   "segredo"  -> senha/chave: nunca volta para a tela; em branco mantem o valor salvo
 #   "booleano" -> caixa de marcar; vira "true" ou "false"
+# obrigatoria = true -> a solucao nao inicia enquanto o campo estiver vazio (o portal avisa qual)
 # Copie o bloco quantas vezes precisar. Apague todos se a solucao nao tiver configuracoes.
 
 [[configuracoes]]

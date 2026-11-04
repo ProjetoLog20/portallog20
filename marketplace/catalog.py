@@ -31,6 +31,8 @@ class Configuracao:
     tipo: str = "texto"
     padrao: str = ""
     ajuda: str = ""
+    # True: a solucao nao inicia enquanto o admin nao preencher (o portal avisa qual campo).
+    obrigatoria: bool = False
 
 
 @dataclass
@@ -186,6 +188,7 @@ def carregar_manifesto(caminho: Path) -> Solucao:
                 tipo=tipo,
                 padrao=str(item.get("padrao", "")),
                 ajuda=str(item.get("ajuda", "")),
+                obrigatoria=bool(item.get("obrigatoria", False)),
             )
         )
 

@@ -669,7 +669,9 @@ function montarFormulario(form, sol) {
         h("label", { for: idCampo }, c.rotulo), ajuda));
     } else {
       form.append(h("div", { class: "campo" },
-        h("label", { for: idCampo }, c.rotulo, c.tipo === "segredo" ? h("span", { class: "etiqueta" }, c.definido ? "Definido" : "Vazio") : null),
+        h("label", { for: idCampo }, c.rotulo,
+          c.tipo === "segredo" ? h("span", { class: "etiqueta" }, c.definido ? "Definido" : "Vazio") : null,
+          c.obrigatoria && !c.definido ? h("span", { class: "etiqueta obrigatoria" }, "Obrigatório") : null),
         h("input", {
           id: idCampo, name: c.nome, autocomplete: "off",
           type: c.tipo === "segredo" ? "password" : "text",

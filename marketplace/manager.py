@@ -325,6 +325,12 @@ class Gerenciador:
             tarefa.registrar(f"Banco: configuracoes preenchidas com o banco do servidor: {', '.join(preenchidas)}.")
 
     def _iniciar(self, sol: Solucao, tarefa: Tarefa) -> None:
+        valores = self.armazenamento.configuracoes(sol)
+        faltando = [c.rotulo for c in sol.configuracoes if c.obrigatoria and not valores.get(c.nome)]
+        if faltando:
+            raise docker_cli.DockerError(
+                f"Preencha em Configuracoes antes de iniciar: {', '.join(faltando)}. Depois clique em Iniciar."
+            )
         if sol.banco:
             self._preparar_banco(sol, tarefa)
         tarefa.etapa = "Iniciando container"

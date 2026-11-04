@@ -98,6 +98,11 @@ def executar(atualizar: bool = False, reiniciar: bool = False, incluir_paradas: 
         if acao is None:
             resultados.append((sol.id, ROTULOS_ESTADO.get(estado, estado), "sem mudanca"))
             continue
+        valores = ger.armazenamento.configuracoes(sol)
+        faltando = [c.rotulo for c in sol.configuracoes if c.obrigatoria and not valores.get(c.nome)]
+        if faltando:
+            resultados.append((sol.id, "falta configurar", f"preencha no portal: {', '.join(faltando)}"))
+            continue
         rotulo = _rotulo(acao, estado)
         print(f"\n==> {sol.nome} ({sol.id}): {rotulo}", flush=True)
         tarefa = TarefaNoTerminal(acao, sol.id)

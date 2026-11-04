@@ -245,6 +245,12 @@ sudo docker compose exec postgres psql -U postgres -d jornada_lideranca      # a
 sudo docker compose exec postgres pg_dump -U postgres -Fc jornada_lideranca > jornada.dump
 ```
 
+**Pelo navegador:** a solução **pgAdmin** (porta 8104) já vem apontada para esse banco e fica
+atrás do portal, como as outras: só abre para quem está logado e tem acesso liberado (libere só
+para quem administra os bancos). Antes de iniciar, defina em **Configurações** a senha do login
+do pgAdmin; ao abrir o servidor, ele pede a senha do banco (`PORTAL_POSTGRES_SENHA` do `.env`,
+ou a do usuário de uma solução, que só enxerga o próprio banco).
+
 Remover uma solução do portal não apaga o banco dela. Para apagar (irreversível):
 `sudo docker compose exec postgres psql -U postgres -c 'DROP DATABASE jornada_lideranca'`.
 
@@ -277,7 +283,7 @@ topo da tela de Soluções, e o acesso às soluções que já estavam no ar cont
 | `[execucao.volumes]` | Pastas do container que devem persistir |
 | `segredos` | Variáveis geradas automaticamente uma única vez |
 | `logo` | Imagem quadrada da solução (png, jpg, svg ou webp) dentro da pasta dela; sem logo, aparece um monograma |
-| `[[configuracoes]]` | Campos editáveis pelo admin (`texto`, `segredo` ou `booleano`) |
+| `[[configuracoes]]` | Campos editáveis pelo admin (`texto`, `segredo` ou `booleano`); `obrigatoria = true` impede iniciar sem preencher |
 | `[banco]` + `[banco.configuracoes]` | Banco no PostgreSQL do servidor: qual configuração recebe cada dado (`{db_host}`, `{db_porta}`, `{db_nome}`, `{db_usuario}`, `{db_senha}` ou `{db_url}`) |
 | `[[acessos_demo]]` | Usuários de teste exibidos ao admin |
 

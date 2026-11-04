@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "PostgreSQL do servidor",
+      "Group": "LOG20",
+      "Host": "log20-postgres",
+      "Port": 5432,
+      "MaintenanceDB": "postgres",
+      "Username": "postgres",
+      "SSLMode": "disable",
+      "Comment": "Banco das solucoes do portal. Senha: PORTAL_POSTGRES_SENHA no .env da VM."
+    }
+  }
+}

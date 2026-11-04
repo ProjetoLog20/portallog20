@@ -356,6 +356,7 @@ def api_detalhe(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
                 "rotulo": c.rotulo,
                 "tipo": c.tipo,
                 "ajuda": c.ajuda,
+                "obrigatoria": c.obrigatoria,
                 # Segredos nunca saem do portal: so informamos se existe valor.
                 "valor": None if c.tipo == "segredo" else valores.get(c.nome, ""),
                 "definido": bool(valores.get(c.nome)),
