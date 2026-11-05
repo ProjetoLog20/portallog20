@@ -84,8 +84,9 @@ ref = "main"
 porta_container = 8080  # <<TROCAR>>
 
 # (obrigatorio) Porta publica da solucao no servidor. Unica entre as solucoes e dentro da
-# faixa do Caddy (8101-8130). Em uso hoje: 8101 (Central), 8102 (Homologacao).
-porta_host = 8103  # <<TROCAR>>
+# faixa do Caddy (8101-8130). No Git use 8101-8115 (8116 em diante ficam para as solucoes
+# criadas pelo assistente em cada servidor). Em uso hoje: 8101 a 8104 e 8110.
+porta_host = 8105  # <<TROCAR>>
 
 # Rota que responde 2xx quando a aplicacao esta pronta. Padrao: "/".
 # Se a imagem tiver HEALTHCHECK no Dockerfile, o portal usa o do Docker.

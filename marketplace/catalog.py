@@ -266,7 +266,8 @@ def carregar_catalogo(pasta: Path, pasta_local: Path | None = None) -> tuple[dic
                 erros.append(f"{caminho}: id '{sol.id}' repetido")
             continue
         if sol.porta_host in portas:
-            erros.append(f"{caminho}: porta {sol.porta_host} ja usada por '{portas[sol.porta_host]}'")
+            erros.append(f"{caminho}: porta {sol.porta_host} ja usada por '{portas[sol.porta_host]}'"
+                         + ("; troque a porta de uma das duas (a deste servidor, em solucao.toml)" if local else ""))
             continue
         portas[sol.porta_host] = sol.id
         solucoes[sol.id] = sol

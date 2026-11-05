@@ -313,7 +313,7 @@ topo da tela de Soluções, e o acesso às soluções que já estavam no ar cont
 | `[build] contexto` | Alternativa ao repositório: pasta local com o código, relativa ao manifesto |
 | `[build] dockerfile_portal` | Dockerfile guardado na pasta do manifesto, usado no lugar do do repositório (o assistente usa) |
 | `[build] imagem` | Nome da imagem Docker; soluções com o mesmo nome compartilham o build |
-| `[execucao] porta_container`, `porta_host` | Porta da aplicação e porta publicada no servidor |
+| `[execucao] porta_container`, `porta_host` | Porta da aplicação e porta publicada no servidor. No Git use **8101-8115**; de 8116 em diante ficam as criadas pelo assistente em cada servidor |
 | `caminho_saude`, `caminho_abrir` | Rota para saber se está no ar e rota aberta pelo botão |
 | `[execucao] caminhos_publicos` | Caminhos que abrem sem login no portal (links públicos da solução, ex.: `["/autoavaliacao/*", "/static/*"]`) |
 | `[execucao.ambiente]` | Variáveis fixas; `{url}` vira o endereço público da solução e `{host}`, só o nome ou IP dele |

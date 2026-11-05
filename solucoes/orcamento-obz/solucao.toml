@@ -26,7 +26,7 @@ dockerfile_portal = "Dockerfile"
 
 [execucao]
 porta_container = 8000
-porta_host = 8105
+porta_host = 8110
 caminho_saude = "/entrar/"
 caminho_abrir = "/"
 

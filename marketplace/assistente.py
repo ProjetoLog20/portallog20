@@ -65,9 +65,17 @@ def validar_origem(repositorio: str, ref: str, subpasta: str) -> tuple[str, str,
     return repositorio, ref, subpasta
 
 
+# Portas: as soluções do repositório do portal (Git) usam o começo da faixa, escolhidas à mão
+# (8101-8115); as criadas pelo assistente em cada servidor começam em 8116. Assim uma solução
+# nova no Git não cai na porta de uma que só existe num servidor.
+INICIO_LOCAIS = 8116
+
+
 def porta_livre(cfg: Config, solucoes: dict[str, Solucao]) -> int:
     usadas = {s.porta_host for s in solucoes.values()}
     inicio, fim = cfg.faixa_portas or (8101, 8199)
+    if inicio < INICIO_LOCAIS <= fim:
+        inicio = INICIO_LOCAIS
     for p in range(inicio, fim + 1):
         if p not in usadas:
             return p
