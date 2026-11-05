@@ -230,7 +230,7 @@ function montarTopo() {
     menu.append(item("#/", "Meus sistemas", rota === "#/"));
     if (eu.perfil === "admin") {
       menu.append(h("span", { class: "menu-divisa", "aria-hidden": "true" }),
-        item("#/admin/solucoes", "Soluções", rota.startsWith("#/admin/solucao") || rota === "#/admin/nova-solucao"),
+        item("#/admin/solucoes", "Soluções", rota.startsWith("#/admin/solucao") || rota === "#/admin/nova-solucao" || rota.startsWith("#/admin/editar-solucao/")),
         item("#/admin/usuarios", "Usuários", rota === "#/admin/usuarios"),
         item("#/admin/acessos", "Acessos", rota === "#/admin/acessos"));
     }
@@ -560,9 +560,10 @@ async function telaSolucao(id) {
   const blocoLocal = sol.local
     ? h("div", { class: "bloco" },
         h("h3", {}, "Levar para outros servidores"),
-        h("p", { class: "nota" }, `Esta solução só existe neste servidor. Para publicá-la nos outros, baixe os arquivos, coloque-os em solucoes/${sol.id}/ no repositório do portal e remova esta cópia daqui.`),
+        h("p", { class: "nota" }, `Esta solução só existe neste servidor. Para publicá-la nos outros, baixe o .zip, descompacte na raiz do repositório do portal (cria solucoes/${sol.id}/), faça o commit e remova esta cópia daqui.`),
         h("div", { class: "linha-botoes topo-8" },
-          h("button", { type: "button", class: "botao pequeno", onclick: () => baixarArquivosLocais(sol.id) }, "Baixar arquivos"),
+          h("a", { class: "botao pequeno", href: `#/admin/editar-solucao/${sol.id}` }, "Editar"),
+          h("button", { type: "button", class: "botao pequeno", onclick: () => baixarArquivosLocais(sol.id) }, "Baixar arquivos (.zip)"),
           h("button", { type: "button", class: "botao pequeno perigo", onclick: () => removerLocal(sol) }, "Remover do catálogo")))
     : null;
 
@@ -1307,12 +1308,12 @@ async function pintarHistorico() {
 
 /* ================= admin: assistente "Nova solução" ================= */
 
-async function baixarArquivosLocais(id) {
-  try {
-    const arquivos = await api(`/api/solucoes/${id}/arquivos-locais`);
-    Object.entries(arquivos).forEach(([nome, texto], i) => setTimeout(() => baixarTexto(nome, texto), i * 300));
-    toast(`${plural(Object.keys(arquivos).length, "arquivo baixado", "arquivos baixados")}: coloque-os em solucoes/${id}/ no repositório do portal.`);
-  } catch (e) { toast(e.message, "erro"); }
+function baixarArquivosLocais(id) {
+  // Um .zip com a pasta solucoes/<id>/ pronta para o repositório do portal (um download só).
+  const a = h("a", { href: `/api/solucoes/${encodeURIComponent(id)}/arquivos-locais.zip`, download: `solucao-${id}.zip`, hidden: true });
+  document.body.append(a);
+  a.click();
+  setTimeout(() => a.remove(), 1000);
 }
 
 async function removerLocal(sol) {
@@ -1389,17 +1390,20 @@ function telaNovaSolucao() {
   form.repositorio.focus();
 }
 
-function pintarAnalise(alvo, an) {
-  const o = an.origem;
-  const avisos = an.avisos.length
-    ? h("ul", { class: "avisos-lista" }, an.avisos.map((a) => h("li", { class: `aviso-item ${a.nivel}` },
+function painelAvisos(avisos) {
+  return avisos.length
+    ? h("ul", { class: "avisos-lista" }, avisos.map((a) => h("li", { class: `aviso-item ${a.nivel}` },
         h("span", { class: "aviso-nivel" }, NIVEIS[a.nivel] || a.nivel),
         h("strong", {}, a.titulo),
         h("p", {}, a.detalhe),
         a.arquivos.length ? h("p", { class: "aviso-arquivos" }, a.arquivos.map((f) => h("code", {}, f))) : null)))
     : h("p", { class: "texto-ok" }, "Nenhum problema encontrado.");
-  const cabecalho = h("section", { class: "painel" },
-    h("h2", {}, "2. O que o portal encontrou"),
+}
+
+function painelDeteccao(an, titulo) {
+  const o = an.origem;
+  return h("section", { class: "painel" },
+    h("h2", {}, titulo),
     h("div", { class: "deteccao" },
       h("div", {},
         h("span", { class: "deteccao-rotulo" }, "Tecnologia"),
@@ -1413,56 +1417,115 @@ function pintarAnalise(alvo, an) {
         h("span", { class: "deteccao-rotulo" }, "Código"),
         h("strong", { class: "deteccao-valor" }, `${o.ref} · ${o.commit}`),
         h("small", {}, o.resumo_commit))),
-    h("h3", { class: "topo-16" }, "Pontos de atenção"), avisos);
+    h("h3", { class: "topo-16" }, "Pontos de atenção"), painelAvisos(an.avisos));
+}
 
-  if (!an.suportado) {
-    alvo.replaceChildren(cabecalho, h("div", { class: "vazio" },
-      h("strong", {}, "Este projeto não pode ser preparado automaticamente"),
-      h("p", {}, "Peça a quem desenvolveu um Dockerfile, ou confira se o branch e a subpasta estão certos.")));
-    return;
-  }
+/** Valores do formulário a partir de uma análise nova. */
+function valoresDaAnalise(an) {
+  return {
+    repositorio: an.origem.repositorio, ref: an.origem.ref, subpasta: an.origem.subpasta, tecnologia: an.nome_tecnologia,
+    id: an.id_sugerido, nome: an.nome_sugerido, resumo: an.resumo_sugerido, categoria: "Geral",
+    porta_host: an.porta_host, porta_container: an.porta_container, caminho_saude: an.caminho_saude,
+    ambiente: { ...an.ambiente }, volumes: { ...an.volumes }, segredos: [...an.segredos],
+    configuracoes: an.configuracoes.map((c) => ({ ...c, incluir: true })),
+    banco: an.banco, usar_banco: !!an.banco,
+    tem_dockerfile: an.tem_dockerfile, dockerfile: an.dockerfile, arquivos: { ...(an.arquivos || {}) },
+  };
+}
 
+/** Tabela das configurações que o sistema lê: cada uma vira um campo em Configurações. */
+function tabelaConfiguracoes(lista, banco) {
+  const corpo = h("tbody");
+  const linhas = [];
+  const doBanco = new Set(Object.keys(banco || {}));
+  const novaLinha = (c) => {
+    const incluir = h("input", { type: "checkbox", checked: c.incluir !== false, "aria-label": `Incluir ${c.nome || "configuração"}` });
+    const nome = h("input", { type: "text", value: c.nome || "", "aria-label": "Nome da variável", class: "cfg-nome", spellcheck: false, placeholder: "NOME_DA_VARIAVEL" });
+    const tipo = h("select", { "aria-label": "Tipo" },
+      [["texto", "Texto"], ["segredo", "Segredo"], ["booleano", "Sim/não"]].map(([v, r]) => h("option", { value: v, selected: (c.tipo || "texto") === v }, r)));
+    const padrao = h("input", { type: "text", value: c.padrao || "", "aria-label": "Valor padrão", placeholder: "sem padrão" });
+    const obrig = h("input", { type: "checkbox", checked: !!c.obrigatoria, "aria-label": "Obrigatória" });
+    const sincronizar = () => { padrao.disabled = tipo.value === "segredo"; if (padrao.disabled) padrao.value = ""; };
+    tipo.addEventListener("change", sincronizar);
+    sincronizar();
+    const tr = h("tr", { class: c.detectada ? "detectada" : "" },
+      h("td", { class: "col-check" }, incluir),
+      h("td", {}, nome, c.ajuda ? h("small", { class: "cfg-ajuda" }, c.ajuda) : null,
+        doBanco.has(c.nome) ? h("small", { class: "cfg-ajuda" }, "Preenchida com o banco do servidor.") : null),
+      h("td", {}, tipo), h("td", {}, padrao), h("td", { class: "col-check" }, obrig));
+    linhas.push({ c, incluir, nome, tipo, padrao, obrig, tr });
+    corpo.append(tr);
+  };
+  lista.forEach(novaLinha);
+  const el = h("div", { class: "campo" },
+    h("label", {}, "Configurações que o sistema lê"),
+    h("small", { class: "sem-topo" }, "Cada linha vira um campo em Gerenciar → Configurações, onde o administrador preenche o valor. Segredos nunca aparecem na tela. Marque Obrigatória quando o sistema não sobe sem ela."),
+    h("div", { class: "tabela-rolagem limite" },
+      h("table", { class: "tabela-simples tabela-cfg" },
+        h("thead", {}, h("tr", {}, ["Usar", "Variável", "Tipo", "Valor padrão", "Obrig."].map((x) => h("th", {}, x)))),
+        corpo)),
+    h("div", { class: "linha-botoes topo-8" },
+      h("button", { type: "button", class: "botao pequeno", onclick: () => { novaLinha({ nome: "", tipo: "texto", incluir: true }); linhas.at(-1).nome.focus(); } }, "Adicionar configuração")));
+  const valores = () => linhas
+    .filter((l) => l.incluir.checked && l.nome.value.trim())
+    .map((l) => ({ nome: l.nome.value.trim(), rotulo: l.c.rotulo && l.c.nome === l.nome.value.trim() ? l.c.rotulo : l.nome.value.trim(),
+                   tipo: l.tipo.value, padrao: l.padrao.value, ajuda: l.c.ajuda || "", obrigatoria: l.obrig.checked }));
+  const adicionar = (c) => novaLinha({ ...c, incluir: true });
+  const nomes = () => new Set(linhas.map((l) => l.nome.value.trim()));
+  return { el, valores, adicionar, nomes };
+}
+
+/** Formulário da solução (criar ou editar). */
+function formularioSolucao(v, { modo, aoSalvar }) {
   const campo = (id, rotulo, valor, extra = {}, ajuda = "") => h("div", { class: "campo" },
     h("label", { for: id }, rotulo),
     h("input", { id, name: id, type: extra.type || "text", value: valor ?? "", autocomplete: "off", ...extra }),
     ajuda ? h("small", {}, ajuda) : null);
   const erro = h("p", { class: "form-erro", role: "alert", hidden: true });
-  const dockerfile = an.tem_dockerfile ? null : h("textarea", { id: "ns-dockerfile", class: "codigo", rows: 16, spellcheck: false }, an.dockerfile || "");
-  const usarBanco = an.banco ? h("label", { class: "campo-check" },
-    h("input", { type: "checkbox", id: "ns-banco", checked: true }),
+  let arquivos = { ...(v.arquivos || {}) };
+  const dockerfile = v.tem_dockerfile && !v.dockerfile ? null : h("textarea", { id: "ns-dockerfile", class: "codigo", rows: 16, spellcheck: false }, v.dockerfile || "");
+  const notaArquivos = h("span", {});
+  const pintarNota = () => notaArquivos.replaceChildren(Object.keys(arquivos).length
+    ? ` Junto vão os arquivos auxiliares ${Object.keys(arquivos).join(", ")} (usados nas linhas COPY --from=portal).` : "");
+  pintarNota();
+  const tabela = tabelaConfiguracoes(v.configuracoes || [], v.usar_banco ? v.banco : null);
+  const usarBanco = v.banco ? h("label", { class: "campo-check" },
+    h("input", { type: "checkbox", id: "ns-banco", checked: v.usar_banco }),
     h("span", {}, h("strong", {}, "Usar o banco PostgreSQL do servidor"),
-      h("small", {}, ` O projeto lê ${Object.keys(an.banco).join(", ")}: o portal cria um banco só para ele e preenche a conexão.`))) : null;
+      h("small", {}, ` O projeto lê ${Object.keys(v.banco).join(", ")}: o portal cria um banco só para ele e preenche a conexão.`))) : null;
 
   const form = h("form", { class: "config", id: "ns-form" },
     h("div", { class: "form-grade" },
-      campo("ns-nome", "Nome", an.nome_sugerido, { required: true, maxlength: 120 }),
-      campo("ns-id", "Identificador", an.id_sugerido, { required: true, pattern: "[a-z0-9][a-z0-9\\-]{1,40}" }, "Minúsculas e hífens. Vira o nome do container; não muda depois."),
-      campo("ns-categoria", "Área", "Geral", { maxlength: 60 }, "Ex.: Recursos Humanos, Operação, Financeiro.")),
-    campo("ns-resumo", "Resumo", an.resumo_sugerido, { maxlength: 200 }, "Uma frase sobre o que o sistema faz. Aparece em Meus sistemas."),
+      campo("ns-nome", "Nome", v.nome, { required: true, maxlength: 120 }),
+      campo("ns-id", "Identificador", v.id, modo === "editar" ? { disabled: true } : { required: true, pattern: "[a-z0-9][a-z0-9\\-]{1,40}" },
+        modo === "editar" ? "Não muda depois de criado." : "Minúsculas e hífens. Vira o nome do container; não muda depois."),
+      campo("ns-categoria", "Área", v.categoria, { maxlength: 60 }, "Ex.: Recursos Humanos, Operação, Financeiro.")),
+    campo("ns-resumo", "Resumo", v.resumo, { maxlength: 200 }, "Uma frase sobre o que o sistema faz. Aparece em Meus sistemas."),
     h("div", { class: "form-grade" },
-      campo("ns-porta-host", "Porta pública", an.porta_host, { type: "number" }, "A primeira livre da faixa do servidor."),
-      campo("ns-porta", "Porta da aplicação", an.porta_container, { type: "number" }, "Onde o sistema escuta dentro do container."),
-      campo("ns-saude", "Rota de saúde", an.caminho_saude, {}, "O portal testa esta rota para saber se está no ar.")),
+      campo("ns-porta-host", "Porta pública", v.porta_host, { type: "number" }, modo === "editar" ? "Mudar a porta muda o endereço do sistema." : "A primeira livre da faixa do servidor."),
+      campo("ns-porta", "Porta da aplicação", v.porta_container, { type: "number" }, "Onde o sistema escuta dentro do container."),
+      campo("ns-saude", "Rota de saúde", v.caminho_saude, {}, "O portal testa esta rota para saber se está no ar.")),
     usarBanco,
+    tabela.el,
     dockerfile ? h("div", { class: "campo" },
       h("label", { for: "ns-dockerfile" }, "Dockerfile"),
       dockerfile,
-      h("small", {}, "Fica guardado no portal: o repositório de quem desenvolveu não muda. Ajuste se precisar.",
-        Object.keys(an.arquivos || {}).length ? ` Junto vão os arquivos auxiliares ${Object.keys(an.arquivos).join(", ")} (usados nas linhas COPY --from=portal).` : "")) : null,
+      h("small", {}, "Fica guardado no portal: o repositório de quem desenvolveu não muda. Ajuste se precisar.", notaArquivos))
+      : h("p", { class: "nota" }, "Usa o Dockerfile do repositório."),
     h("details", { class: "avancado" },
-      h("summary", {}, "Variáveis, volumes e segredos"),
+      h("summary", {}, "Variáveis fixas, volumes e segredos gerados"),
       h("div", { class: "config topo-16" },
         h("div", { class: "campo" }, h("label", { for: "ns-amb" }, "Variáveis de ambiente fixas"),
-          h("textarea", { id: "ns-amb", class: "codigo", rows: 4, spellcheck: false }, paraLinhas(an.ambiente)),
-          h("small", {}, "Uma por linha, NOME=valor. {url} vira o endereço público e {host}, só o IP ou nome.")),
+          h("textarea", { id: "ns-amb", class: "codigo", rows: 4, spellcheck: false }, paraLinhas(v.ambiente)),
+          h("small", {}, "Uma por linha, NOME=valor. {url} vira o endereço público e {host}, só o IP ou nome. Ninguém edita estas depois; para isso, use a tabela acima.")),
         h("div", { class: "campo" }, h("label", { for: "ns-vol" }, "Pastas que guardam dados (volumes)"),
-          h("textarea", { id: "ns-vol", class: "codigo", rows: 2, spellcheck: false }, paraLinhas(an.volumes)),
+          h("textarea", { id: "ns-vol", class: "codigo", rows: 2, spellcheck: false }, paraLinhas(v.volumes)),
           h("small", {}, "Uma por linha, apelido=/caminho/no/container. O resto do container é refeito a cada atualização.")),
-        campo("ns-segredos", "Segredos gerados pelo portal", an.segredos.join(", "), {}, "Nomes separados por vírgula (ex.: SECRET_KEY). Valor aleatório, criado uma vez, nunca aparece na tela."))),
+        campo("ns-segredos", "Segredos gerados pelo portal", (v.segredos || []).join(", "), {}, "Nomes separados por vírgula (ex.: SECRET_KEY). Valor aleatório, criado uma vez, nunca aparece na tela."))),
     erro,
     h("div", { class: "linha-botoes" },
-      h("button", { type: "submit", class: "botao primario" }, "Criar solução"),
-      an.avisos.some((a) => a.nivel === "erro") ? h("small", { class: "texto-erro" }, "Há itens para resolver: dá para criar e testar, mas não use com dados reais antes de corrigir.") : null));
+      h("button", { type: "submit", class: "botao primario" }, modo === "editar" ? "Salvar alterações" : "Criar solução"),
+      modo === "editar" ? h("a", { class: "botao", href: `#/admin/solucao/${v.id}` }, "Cancelar") : null));
 
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -1470,28 +1533,116 @@ function pintarAnalise(alvo, an) {
     const botao = form.querySelector("button[type=submit]");
     botao.disabled = true;
     const usar = !!form.querySelector("#ns-banco")?.checked;
+    const doBanco = Object.keys(v.banco || {});
     const dados = {
-      repositorio: o.repositorio, ref: o.ref, subpasta: o.subpasta, tecnologia: an.nome_tecnologia,
-      id: form["ns-id"].value.trim(), nome: form["ns-nome"].value, resumo: form["ns-resumo"].value, categoria: form["ns-categoria"].value,
+      repositorio: v.repositorio, ref: v.ref, subpasta: v.subpasta, tecnologia: v.tecnologia,
+      id: modo === "editar" ? v.id : form["ns-id"].value.trim(), nome: form["ns-nome"].value, resumo: form["ns-resumo"].value,
+      categoria: form["ns-categoria"].value,
       porta_host: Number(form["ns-porta-host"].value), porta_container: Number(form["ns-porta"].value), caminho_saude: form["ns-saude"].value.trim(),
       ambiente: deLinhas(form.querySelector("#ns-amb").value), volumes: deLinhas(form.querySelector("#ns-vol").value),
       segredos: form["ns-segredos"].value.split(",").map((s) => s.trim()).filter(Boolean),
-      configuracoes: an.configuracoes.filter((c) => usar || !Object.keys(an.banco || {}).includes(c.nome)),
-      banco: an.banco, usar_banco: usar,
+      configuracoes: tabela.valores().filter((c) => usar || !doBanco.includes(c.nome)),
+      banco: v.banco, usar_banco: usar,
       dockerfile: dockerfile ? dockerfile.value : null,
-      arquivos: an.arquivos || {},
+      arquivos,
     };
-    try {
-      const r = await api("/api/assistente/criar", { method: "POST", body: { dados } });
-      pintarCriada(alvo, r, dados);
-    } catch (e) {
-      erro.textContent = e.message;
-      erro.hidden = false;
-      botao.disabled = false;
-    }
+    try { await aoSalvar(dados); } catch (e) { erro.textContent = e.message; erro.hidden = false; botao.disabled = false; }
   });
 
-  alvo.replaceChildren(cabecalho, h("section", { class: "painel" }, h("h2", {}, "3. Revise e crie"), form));
+  /** Aplica o resultado de uma nova análise (Analisar de novo, na edição). */
+  const aplicarAnalise = (an) => {
+    const atuais = tabela.nomes();
+    const novas = an.configuracoes.filter((c) => !atuais.has(c.nome) && !(v.segredos || []).includes(c.nome));
+    const dockerNovo = an.dockerfile && dockerfile && an.dockerfile.trim() !== dockerfile.value.trim();
+    return { novas, dockerNovo,
+      adicionar: (c) => tabela.adicionar(c),
+      usarDockerfile: () => { dockerfile.value = an.dockerfile; arquivos = { ...(an.arquivos || {}) }; pintarNota(); } };
+  };
+  return { form, aplicarAnalise };
+}
+
+function pintarAnalise(alvo, an) {
+  const cabecalho = painelDeteccao(an, "2. O que o portal encontrou");
+  if (!an.suportado) {
+    alvo.replaceChildren(cabecalho, h("div", { class: "vazio" },
+      h("strong", {}, "Este projeto não pode ser preparado automaticamente"),
+      h("p", {}, "Peça a quem desenvolveu um Dockerfile, ou confira se o branch e a subpasta estão certos.")));
+    return;
+  }
+  const v = valoresDaAnalise(an);
+  const { form } = formularioSolucao(v, {
+    modo: "criar",
+    aoSalvar: async (dados) => { const r = await api("/api/assistente/criar", { method: "POST", body: { dados } }); pintarCriada(alvo, r, dados); },
+  });
+  const temErro = an.avisos.some((a) => a.nivel === "erro");
+  alvo.replaceChildren(cabecalho, h("section", { class: "painel" }, h("h2", {}, "3. Revise e crie"),
+    temErro ? h("p", { class: "texto-erro topo-ajuste" }, "Há itens para resolver: dá para criar e testar, mas não use com dados reais antes de corrigir.") : null,
+    form));
+}
+
+async function telaEditarSolucao(id) {
+  const v = await api(`/api/assistente/solucoes/${encodeURIComponent(id)}`);
+  document.title = `Editar ${v.nome} · Portal de Soluções LOG20`;
+  const reanalise = h("div", { id: "ns-reanalise" });
+  const { form, aplicarAnalise } = formularioSolucao(v, {
+    modo: "editar",
+    aoSalvar: async (dados) => {
+      const r = await api(`/api/assistente/solucoes/${encodeURIComponent(id)}`, { method: "PUT", body: { dados } });
+      location.hash = `#/admin/solucao/${id}`;
+      setTimeout(() => toast(`Alterações salvas. ${r.aviso}`), 300);
+    },
+  });
+  const botaoReanalisar = h("button", {
+    type: "button", class: "botao", onclick: async (ev) => {
+      const b = ev.currentTarget;
+      b.disabled = true;
+      b.replaceChildren(h("span", { class: "giro", "aria-hidden": "true" }), "Analisando o código mais recente…");
+      try {
+        const an = await api("/api/assistente/analisar", { method: "POST", body: { repositorio: v.repositorio, ref: v.ref, subpasta: v.subpasta } });
+        pintarReanalise(reanalise, an, aplicarAnalise(an));
+      } catch (e) { toast(e.message, "erro"); }
+      b.disabled = false;
+      b.textContent = "Analisar de novo";
+    },
+  }, "Analisar de novo");
+  const repo = v.repositorio.replace(/^https:\/\//, "").replace(/\.git$/, "");
+  $conteudo.replaceChildren(
+    h("a", { class: "voltar", href: `#/admin/solucao/${id}` }, v.nome),
+    h("section", { class: "intro intro-linha" },
+      h("div", {}, h("h1", {}, `Editar ${v.nome}`),
+        h("p", {}, `${repo} · ${v.ref}${v.subpasta ? ` · ${v.subpasta}/` : ""}. As mudanças valem no próximo Reiniciar (ou Atualizar, se o Dockerfile mudar).`)),
+      h("div", { class: "intro-lado" }, botaoReanalisar)),
+    reanalise,
+    h("section", { class: "painel" }, h("h2", {}, "Dados da solução"), form));
+}
+
+function pintarReanalise(alvo, an, ap) {
+  const itens = [];
+  if (ap.novas.length) {
+    const marcas = ap.novas.map((c) => ({ c, caixa: h("input", { type: "checkbox", checked: true, "aria-label": `Adicionar ${c.nome}` }) }));
+    itens.push(h("div", { class: "bloco" },
+      h("h3", {}, plural(ap.novas.length, "configuração nova no código", "configurações novas no código")),
+      h("ul", { class: "lista-novas" }, marcas.map(({ c, caixa }) => h("li", {}, h("label", { class: "campo-check" }, caixa,
+        h("span", {}, h("code", {}, c.nome), h("small", {}, ` ${c.tipo}${c.obrigatoria ? ", obrigatória" : ""}. ${c.ajuda || ""}`)))))),
+      h("button", { type: "button", class: "botao pequeno", onclick: (ev) => {
+        let n = 0;
+        for (const { c, caixa } of marcas) if (caixa.checked) { ap.adicionar(c); n += 1; }
+        ev.currentTarget.disabled = true;
+        toast(`${plural(n, "configuração adicionada", "configurações adicionadas")} à tabela. Salve para valer.`);
+      } }, "Adicionar as marcadas")));
+  }
+  if (ap.dockerNovo) {
+    itens.push(h("div", { class: "bloco" },
+      h("h3", {}, "O Dockerfile sugerido mudou"),
+      h("p", { class: "nota" }, "O código mudou desde a criação (ex.: dependências ou tecnologia). Você pode trocar o Dockerfile guardado pelo sugerido agora; o seu atual se perde se você salvar."),
+      h("details", {}, h("summary", {}, "Ver o sugerido"), h("pre", { class: "saida curta" }, an.dockerfile)),
+      h("button", { type: "button", class: "botao pequeno topo-8", onclick: (ev) => { ap.usarDockerfile(); ev.currentTarget.disabled = true; toast("Dockerfile trocado no formulário. Salve para valer."); } }, "Usar o Dockerfile sugerido")));
+  }
+  alvo.replaceChildren(
+    painelDeteccao(an, "Análise do código mais recente"),
+    h("section", { class: "painel" }, h("h2", {}, "O que mudou"),
+      itens.length ? itens : h("p", { class: "texto-ok" }, "Nada novo: as configurações e o Dockerfile já estão em dia com o código.")));
+  alvo.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function pintarCriada(alvo, r, dados) {
@@ -1509,8 +1660,8 @@ function pintarCriada(alvo, r, dados) {
         },
       }, "Instalar e iniciar"),
       h("a", { class: "botao", href: `#/admin/solucao/${r.id}` }, "Ver a solução"),
-      h("button", { type: "button", class: "botao sutil", onclick: () => baixarArquivosLocais(r.id) }, "Baixar arquivos")),
-    h("p", { class: "nota" }, `Para usar em outros servidores, coloque os arquivos baixados em solucoes/${r.id}/ no repositório do portal. Depois, libere o sistema para as pessoas em Acessos.`)));
+      h("button", { type: "button", class: "botao sutil", onclick: () => baixarArquivosLocais(r.id) }, "Baixar arquivos (.zip)")),
+    h("p", { class: "nota" }, `Configurações obrigatórias precisam ser preenchidas em Gerenciar → Configurações antes de iniciar. Para usar em outros servidores, descompacte o .zip na raiz do repositório do portal (cria solucoes/${r.id}/). Depois, libere o sistema em Acessos.`)));
   alvo.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -1603,6 +1754,7 @@ async function navegar() {
     else if (rota === "#/admin/usuarios") await telaUsuarios();
     else if (rota === "#/admin/acessos") await telaAcessos();
     else if (rota === "#/admin/nova-solucao") telaNovaSolucao();
+    else if (rota.startsWith("#/admin/editar-solucao/")) await telaEditarSolucao(rota.split("/")[3]);
     else { rota = "#/"; await telaMeusSistemas(); novoRitmo = [60000, 60000]; }
   } catch (e) {
     if (e.status === 401 || location.hash.split("?")[0] !== rota) return;

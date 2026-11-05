@@ -163,7 +163,7 @@ def _versao_python(repo: Repo) -> str:
 # Arquivos auxiliares gerados junto com o Dockerfile. Ficam na pasta do manifesto e chegam ao
 # build pelo contexto extra "portal" (docker build --build-context portal=<pasta do manifesto>).
 ARQ_SAUDE = """#!/usr/bin/env python3
-# Gerado pelo Portal LOG20: a aplicacao esta no ar se responder com qualquer codigo abaixo de 500.
+# Gerado pelo Portal LOG20: a aplicação esta no ar se responder com qualquer código abaixo de 500.
 import sys, urllib.error, urllib.request
 try:
     urllib.request.urlopen(sys.argv[1], timeout=4)
@@ -655,6 +655,146 @@ def _avisos_gerais(repo: Repo) -> list[Aviso]:
     return avisos
 
 
+# ---------------------------------------------------------------- variaveis de ambiente lidas pelo codigo
+
+# Variaveis que o portal ou o container ja resolvem: nao viram configuracao.
+VARS_DO_SISTEMA = {
+    "PORT", "HOST", "HOSTNAME", "PATH", "HOME", "PWD", "USER", "LANG", "TZ", "TERM", "SHELL", "CI", "NODE_ENV",
+    "PYTHONPATH", "PYTHONUNBUFFERED", "DJANGO_SETTINGS_MODULE", "ALLOWED_HOSTS", "CSRF_TRUSTED_ORIGINS", "DEBUG",
+    "ASPNETCORE_ENVIRONMENT", "ASPNETCORE_URLS", "JAVA_OPTS", "WEB_CONCURRENCY", "GUNICORN_CMD_ARGS", "APP_ENV",
+    "FLASK_APP", "FLASK_ENV", "FLASK_DEBUG", "ENVIRONMENT", "ENV", "STREAMLIT_SERVER_PORT", "NEXT_TELEMETRY_DISABLED",
+}
+# Endereco do proprio sistema: vai fixo no ambiente como {url}, ninguem precisa digitar.
+VARS_ENDERECO = re.compile(r"^(APP|BASE|SITE|PUBLIC|FRONTEND|SERVER|WEB|ROOT|HOST)_?URL$")
+VAR_SEGREDO = re.compile(r"SECRET|PASSWORD|PASSWD|PASS$|SENHA|TOKEN$|_TOKEN_|API_?KEY|PRIVATE_KEY|CREDENTIAL|_KEY$|^KEY$|DSN$|DATABASE_URL|_URI$|_URL_DB")
+# Pastas cujo codigo nao roda no servidor (scripts avulsos, migracoes, testes, frontend compilado).
+PASTAS_SEM_VARS = re.compile(r"(^|/)(scripts?|migrations?|seeds?|tests?|__tests__|spec|fixtures|docs?|frontend|client|web|public|static)/", re.I)
+VAR_BOOL = re.compile(r"ENABLE|ENABLED|^USE_|_USE_|DISABLE|^DEBUG_|_DEBUG$|ATIVO|ATIVAR|^IS_|^HAS_")
+VAR_GERADA = re.compile(r"^(SECRET_KEY|SECRET|APP_SECRET|APP_KEY_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET|COOKIE_SECRET|FLASK_SECRET_KEY|ENCRYPTION_KEY)$")
+VARS_BUILD = re.compile(r"^(VITE_|REACT_APP_|NEXT_PUBLIC_|VUE_APP_|NUXT_PUBLIC_)")
+_NOME = r"([A-Z][A-Z0-9_]{1,63})"
+_LIT = r"""\s*(?:"([^"\n]{0,200})"|'([^'\n]{0,200})'|(-?\d+(?:\.\d+)?|True|False|true|false|None|null))"""
+
+# (regex, tem_valor_padrao, obrigatoria_sem_padrao): grupo 1 = nome; grupos 2-4 = valor padrao (quando ha).
+PADROES_VARS = [
+    # Python
+    (r"os\.environ\[\s*[\"']" + _NOME + r"[\"']\s*\]", False, True),
+    (r"(?:os\.environ\.get|os\.getenv|getenv)\(\s*[\"']" + _NOME + r"[\"']\s*(?:,(?:\s*default\s*=)?" + _LIT + r")?", True, False),
+    (r"\benv(?:\.(?:str|bool|int|float|list|db|url|json))?\(\s*[\"']" + _NOME + r"[\"']\s*(?:,\s*default\s*=" + _LIT + r")?", True, True),
+    (r"\bconfig\(\s*[\"']" + _NOME + r"[\"']\s*(?:,\s*default\s*=" + _LIT + r")?", True, True),
+    # Node
+    (r"process\.env\.([A-Z][A-Z0-9_]{1,63})(?:\s*(?:\|\||\?\?)" + _LIT + r")?", True, False),
+    (r"process\.env\[\s*[\"']" + _NOME + r"[\"']\s*\](?:\s*(?:\|\||\?\?)" + _LIT + r")?", True, False),
+    # PHP
+    (r"(?:getenv|env)\(\s*[\"']" + _NOME + r"[\"']\s*(?:," + _LIT + r")?", True, False),
+    (r"\$_(?:ENV|SERVER)\[\s*[\"']" + _NOME + r"[\"']\s*\]", False, False),
+    # .NET / Java
+    (r"Environment\.GetEnvironmentVariable\(\s*\"" + _NOME + r"\"", False, False),
+    (r"System\.getenv\(\s*\"" + _NOME + r"\"\s*\)", False, False),
+    (r"\$\{" + _NOME + r"(?::([^}]{0,200}))?\}", True, False),  # application.properties / yml
+]
+EXT_VARS = {".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".php", ".cs", ".java", ".kt", ".properties", ".yml", ".yaml"}
+
+
+def _exemplos_env(repo: Repo) -> dict[str, tuple[str, str]]:
+    """Variaveis de .env.example/.env.sample: nome -> (valor de exemplo, comentario acima)."""
+    vars_: dict[str, tuple[str, str]] = {}
+    for arq in repo.arquivos:
+        if not re.search(r"(^|/)\.env\.(example|exemplo|sample|template|dist)$|(^|/)env\.(example|exemplo|sample)$", arq):
+            continue
+        comentario = ""
+        for linha in repo.ler(arq).splitlines():
+            linha = linha.strip()
+            if linha.startswith("#"):
+                texto_com = linha.lstrip("# ").strip()
+                # "# DATABASE_URL=..." e uma variavel comentada, nao uma explicacao.
+                comentario = "" if re.match(r"[A-Z][A-Z0-9_]+\s*=", texto_com) else texto_com
+                continue
+            m = re.match(r"(?:export\s+)?([A-Z][A-Z0-9_]{1,63})\s*=\s*(.*)$", linha)
+            if m:
+                valor = m.group(2).strip().strip("\"'")
+                vars_.setdefault(m.group(1), (valor, comentario))
+            comentario = ""
+    return vars_
+
+
+def _parece_exemplo(valor: str) -> bool:
+    return bool(re.search(r"(?i)troque|change|your|seu|sua|xxx|<|exemplo|example|aqui|here|placeholder|\*\*\*|senha|password|secret", valor))
+
+
+def _variaveis(repo: Repo, an: dict) -> None:
+    """Acha as variáveis de ambiente que o código le e propoe cada uma como configuração."""
+    achadas: dict[str, dict] = {}
+    for arq in repo.arquivos:
+        if (Path(arq).suffix.lower() not in EXT_VARS or "test" in arq.lower() or arq.endswith(".min.js")
+                or (PASTAS_SEM_VARS.search(arq) and Path(arq).suffix.lower() not in {".properties", ".yml", ".yaml"})):
+            continue
+        texto = repo.ler(arq)
+        for padrao, aceita_padrao, obrig in PADROES_VARS:
+            for m in re.finditer(padrao, texto):
+                nome = m.group(1)
+                padrao_valor = next((g for g in m.groups()[1:] if g is not None), None) if aceita_padrao else None
+                if padrao_valor in ("None", "null"):
+                    padrao_valor = None
+                # env("X", default=algo_calculado): tem padrao, so nao e um valor fixo que da para mostrar.
+                if obrig and padrao_valor is None and re.match(r"\s*,", texto[m.end():m.end() + 60]):
+                    obrig = False
+                v = achadas.setdefault(nome, {"arquivos": [], "padrao": None, "obrigatoria": True, "bool": False})
+                if m.group(0).startswith(("env.bool", "config(")) and "cast=bool" in texto[m.end():m.end() + 80] or m.group(0).startswith("env.bool"):
+                    v["bool"] = True
+                if arq not in v["arquivos"]:
+                    v["arquivos"].append(arq)
+                if padrao_valor is not None:
+                    v["padrao"] = padrao_valor
+                # Obrigatoria so se todos os usos sao do tipo que quebra sem valor (ex.: os.environ["X"]).
+                v["obrigatoria"] = v["obrigatoria"] and obrig and padrao_valor is None
+    exemplos = _exemplos_env(repo)
+    for nome, (valor, comentario) in exemplos.items():
+        v = achadas.setdefault(nome, {"arquivos": [], "padrao": None, "obrigatoria": False})
+        v["exemplo"], v["comentario"] = valor, comentario
+        if v["padrao"] is None and valor and not _parece_exemplo(valor) and not VAR_SEGREDO.search(nome):
+            v["padrao"] = valor
+
+    ja = {c["nome"] for c in an["configuracoes"]} | set(an["segredos"]) | set(an["ambiente"]) | set(an.get("banco") or {})
+    de_build = []
+    for nome in sorted(achadas):
+        v = achadas[nome]
+        if nome in VARS_DO_SISTEMA or nome in ja:
+            continue
+        if VARS_BUILD.match(nome):
+            de_build.append(nome)
+            continue
+        if VARS_ENDERECO.match(nome):
+            an["ambiente"][nome] = "{url}"
+            continue
+        # Chave interna do proprio sistema (assinar sessoes/tokens): o portal gera e guarda sozinho.
+        if VAR_GERADA.search(nome) and not re.search(r"API|CLIENT|OAUTH|AWS|STRIPE|GOOGLE", nome):
+            if nome not in an["segredos"]:
+                an["segredos"].append(nome)
+            continue
+        padrao_txt = "" if v["padrao"] is None else str(v["padrao"])
+        if VAR_SEGREDO.search(nome):
+            tipo, padrao_txt = "segredo", ""
+        elif v.get("bool") or (padrao_txt.lower() in ("true", "false", "1", "0") and (VAR_BOOL.search(nome) or padrao_txt.lower() in ("true", "false"))):
+            tipo, padrao_txt = "booleano", "true" if padrao_txt.lower() in ("true", "1") else "false"
+        else:
+            tipo = "texto"
+        onde = ", ".join(v["arquivos"][:2]) or "arquivo de exemplo de variáveis"
+        ajuda = v.get("comentario") or ""
+        ajuda = (ajuda + " " if ajuda else "") + f"Lida em {onde}."
+        if v["obrigatoria"]:
+            ajuda += " O código não tem valor padrão: sem ela o sistema não sobe."
+        an["configuracoes"].append({"nome": nome, "rotulo": nome, "tipo": tipo, "padrao": padrao_txt, "ajuda": ajuda,
+                                    "obrigatoria": bool(v["obrigatoria"] and not padrao_txt), "detectada": True})
+        if len(an["configuracoes"]) >= 40:
+            break
+    if de_build:
+        an["avisos"].append(Aviso("info", "Variaveis usadas na hora do build",
+                                  "Estas variáveis entram no site quando ele e construido, não quando ele roda; as "
+                                  "Configurações do portal não chegam até elas. Use caminhos relativos ou valores fixos.",
+                                  de_build[:8]))
+
+
 # ---------------------------------------------------------------- entrada
 
 def analisar(pasta: Path, nome_repo: str = "") -> Analise:
@@ -725,6 +865,8 @@ def analisar(pasta: Path, nome_repo: str = "") -> Analise:
             "Não encontrei um servidor web conhecido (Django, Flask, FastAPI, Streamlit, Node, PHP, .NET, Java ou HTML). "
             "Scripts e rotinas sem tela não rodam como solução do portal. Peça um Dockerfile a quem desenvolveu.", []))
 
+    if an["suportado"]:
+        _variaveis(repo, an)
     an["avisos"].extend(_avisos_gerais(repo))
     ordem = {"erro": 0, "atencao": 1, "info": 2}
     an["avisos"].sort(key=lambda a: ordem.get(a.nivel, 3))

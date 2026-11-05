@@ -458,6 +458,45 @@ def api_assistente_criar(dados: dict = Body(..., embed=True), autor: Usuario = D
     return {**r, "proxy": _estado.get("proxy")}
 
 
+@app.get("/api/assistente/solucoes/{sid}")
+def api_assistente_ler(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
+    """Valores atuais de uma solucao criada pelo assistente, para a tela de edicao."""
+    try:
+        return assistente.para_edicao(CFG, _solucao(sid))
+    except assistente.ErroAssistente as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.put("/api/assistente/solucoes/{sid}")
+def api_assistente_editar(sid: str, dados: dict = Body(..., embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
+    sol = _solucao(sid)
+    tarefa = ger().tarefas.get(sid)
+    if tarefa and tarefa.estado == "executando":
+        raise HTTPException(409, "Aguarde a operação em andamento nesta solução.")
+    try:
+        antes = assistente.para_edicao(CFG, sol)
+        r = assistente.editar(CFG, ger().solucoes, sid, dados)
+    except assistente.ErroAssistente as exc:
+        raise HTTPException(400, str(exc)) from exc
+    _carregar()
+    depois = assistente.para_edicao(CFG, _solucao(sid))
+    mudou_build = (antes["dockerfile"], antes["arquivos"], antes["repositorio"], antes["ref"], antes["subpasta"]) != (
+        depois["dockerfile"], depois["arquivos"], depois["repositorio"], depois["ref"], depois["subpasta"])
+    AUTH.registrar(autor, "Editou solução do assistente", sid)
+    return {**r, "aviso": "Para valer, clique em Atualizar: o Dockerfile ou a origem do código mudou." if mudou_build
+            else "Para valer, clique em Reiniciar.", "acao": "reconstruir" if mudou_build else "iniciar"}
+
+
+@app.get("/api/solucoes/{sid}/arquivos-locais.zip", include_in_schema=False)
+def api_arquivos_zip(sid: str, _: Usuario = Depends(exigir_admin)) -> Response:
+    try:
+        conteudo = assistente.zip_arquivos(CFG, sid)
+    except assistente.ErroAssistente as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return Response(conteudo, media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="solucao-{sid}.zip"', "Cache-Control": "no-store"})
+
+
 @app.get("/api/solucoes/{sid}/arquivos-locais")
 def api_arquivos_locais(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
     try:

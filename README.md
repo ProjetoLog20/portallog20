@@ -266,14 +266,29 @@ executado nessa etapa) e mostra:
 - os **pontos de atenção**: senhas e chaves no código, `.env` ou planilhas com CPF no
   repositório, HTTPS forçado, `ALLOWED_HOSTS` ou banco fixos no código, endereço `localhost`
   no frontend, entre outros;
-- um **Dockerfile sugerido** (quando o projeto não tem), a porta, a rota de saúde, as
-  variáveis, os volumes e se dá para usar o banco do servidor. Tudo editável antes de criar.
+- as **configurações que o sistema lê**: o portal procura no código as variáveis de ambiente
+  (`os.environ`, `os.getenv`, `env()`/`config()` do django-environ e decouple,
+  `process.env`, `getenv()` do PHP, `Environment.GetEnvironmentVariable`, `${X:padrao}` do
+  Spring) e no `.env.example`. Cada uma vira um campo em **Gerenciar → Configurações**, com tipo
+  (texto, segredo ou sim/não), valor padrão e **obrigatória** quando o código não tem padrão.
+  Chaves como `SECRET_KEY`/`JWT_SECRET` viram segredos gerados pelo portal; variáveis de
+  endereço (`BASE_URL`, `SITE_URL`…) recebem o endereço público. Dá para desmarcar ou adicionar
+  linhas;
+- um **Dockerfile sugerido** (quando o projeto não tem), a porta, a rota de saúde, os volumes e
+  se dá para usar o banco do servidor. Tudo editável antes de criar.
 
 Ao clicar em **Criar solução**, o manifesto e o Dockerfile ficam em
 `dados/solucoes-locais/<id>/`, **só neste servidor** e fora do Git: o repositório de quem
-desenvolveu não muda. A solução aparece com a etiqueta *Neste servidor*. Para levá-la aos
-outros servidores, use **Baixar arquivos** (na ficha da solução), coloque-os em
-`solucoes/<id>/` no repositório do portal e remova a cópia local (**Remover do catálogo**).
+desenvolveu não muda. A solução aparece com a etiqueta *Neste servidor*.
+
+Na ficha da solução:
+
+- **Editar** reabre o mesmo formulário (o identificador não muda). Mudanças nas configurações e
+  portas valem no próximo **Reiniciar**; se o Dockerfile mudar, use **Atualizar**. Na edição,
+  **Analisar de novo** lê o código mais recente do branch e mostra o que mudou: variáveis novas
+  (para adicionar com um clique) e se o Dockerfile sugerido ficou diferente do guardado.
+- **Baixar arquivos (.zip)** entrega a pasta `solucoes/<id>/` pronta: descompacte na raiz do
+  repositório do portal, faça o commit, e depois **Remover do catálogo** a cópia local.
 
 ## Publicar uma nova solução (pelo Git)
 

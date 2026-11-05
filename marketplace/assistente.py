@@ -12,6 +12,7 @@ import re
 import shutil
 import tempfile
 import time
+import tomllib
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -135,6 +136,7 @@ def gerar_manifesto(d: dict, com_dockerfile: bool) -> str:
         'versao = "1.0.0"',
         f"responsavel = {_s(d.get('responsavel') or 'LOG20')}",
         f"tags = [{', '.join(_s(t) for t in d.get('tags', []))}]",
+        *([f"tecnologia = {_s(d['tecnologia'])}"] if d.get("tecnologia") else []),
         f"segredos = [{', '.join(_s(s) for s in d['segredos'])}]",
         f'descricao = """\n{descricao.replace(chr(92), chr(92) * 2).replace(chr(34) * 3, chr(39) * 3)}\n"""',
         "",
@@ -177,13 +179,16 @@ def gerar_manifesto(d: dict, com_dockerfile: bool) -> str:
     return "\n".join(linhas) + "\n"
 
 
-def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao]) -> dict:
+def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao], editando: str | None = None) -> dict:
     """Confere e normaliza o que veio da tela. Erros viram ErroAssistente com mensagem clara."""
     repositorio, ref, subpasta = validar_origem(d.get("repositorio", ""), d.get("ref", ""), d.get("subpasta", ""))
     sid = str(d.get("id", "")).strip()
     if not ID_RE.match(sid):
         raise ErroAssistente("Identificador: 2 a 41 caracteres, letras minúsculas, números e hífens (ex.: controle-frota).")
-    if sid in solucoes or (cfg.pasta_solucoes_locais / sid).exists():
+    if editando:
+        if sid != editando:
+            raise ErroAssistente("O identificador não muda depois de criado.")
+    elif sid in solucoes or (cfg.pasta_solucoes_locais / sid).exists():
         raise ErroAssistente(f"Já existe uma solução com o identificador '{sid}'.")
     nome = " ".join(str(d.get("nome", "")).split())
     if not nome:
@@ -197,7 +202,7 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao]) -> dict:
     inicio, fim = cfg.faixa_portas or (1024, 65535)
     if not inicio <= porta_h <= fim:
         raise ErroAssistente(f"A porta pública deve ficar na faixa {inicio}-{fim}.")
-    if any(s.porta_host == porta_h for s in solucoes.values()):
+    if any(s.porta_host == porta_h and s.id != editando for s in solucoes.values()):
         raise ErroAssistente(f"A porta {porta_h} já é usada por outra solução.")
     saude = str(d.get("caminho_saude") or "/").strip()
     if not saude.startswith("/") or re.search(r"\s", saude):
@@ -211,11 +216,25 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao]) -> dict:
         if not VOLUME_RE.match(k) or not v.startswith("/"):
             raise ErroAssistente(f"Volume '{k}': apelido em minúsculas e caminho absoluto no container (ex.: /app/data).")
     segredos = [s for s in (str(x).strip() for x in d.get("segredos") or []) if s]
-    configuracoes = []
+    configuracoes, vistos = [], set()
     for c in d.get("configuracoes") or []:
-        if not VAR_RE.match(str(c.get("nome", ""))) or (c.get("tipo") or "texto") not in TIPOS:
+        nome_c, tipo = str(c.get("nome", "")).strip(), c.get("tipo") or "texto"
+        if not VAR_RE.match(nome_c) or tipo not in TIPOS:
             raise ErroAssistente(f"Configuração inválida: {c.get('nome')}")
-        configuracoes.append(c)
+        if nome_c in vistos:
+            continue
+        vistos.add(nome_c)
+        padrao = str(c.get("padrao") or "")
+        if tipo == "booleano":
+            padrao = "true" if padrao.lower() in ("true", "1", "sim", "on") else "false" if padrao else ""
+        elif tipo == "segredo":
+            padrao = ""  # segredo nao tem valor padrao no manifesto (iria para o Git)
+        configuracoes.append({"nome": nome_c, "rotulo": " ".join(str(c.get("rotulo") or nome_c).split())[:120],
+                              "tipo": tipo, "padrao": padrao[:500], "ajuda": " ".join(str(c.get("ajuda") or "").split())[:500],
+                              "obrigatoria": bool(c.get("obrigatoria"))})
+    for nome_c in list(ambiente):
+        if nome_c in vistos:
+            ambiente.pop(nome_c)  # a configuracao editavel vale no lugar do valor fixo
     nomes_conf = {c["nome"] for c in configuracoes}
     for s in segredos:
         if not VAR_RE.match(s):
@@ -228,12 +247,12 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao]) -> dict:
                 configuracoes.append({"nome": k, "rotulo": f"Banco: {k}", "tipo": "segredo" if "SENHA" in k or "PASSWORD" in k
                                       or k.endswith("URL") else "texto", "ajuda": "Preenchido pelo portal com o banco do servidor."})
     arquivos = {}
-    for nome, conteudo in (d.get("arquivos") or {}).items():
-        if not re.fullmatch(r"[A-Za-z0-9][\w.-]{0,60}", str(nome)) or nome in {"solucao.toml", "Dockerfile", "Dockerfile.dockerignore"}:
-            raise ErroAssistente(f"Nome de arquivo auxiliar inválido: {nome}")
+    for arq, conteudo in (d.get("arquivos") or {}).items():
+        if not re.fullmatch(r"[A-Za-z0-9][\w.-]{0,60}", str(arq)) or arq in {"solucao.toml", "Dockerfile", "Dockerfile.dockerignore"}:
+            raise ErroAssistente(f"Nome de arquivo auxiliar inválido: {arq}")
         if len(str(conteudo)) > MAX_DOCKERFILE:
-            raise ErroAssistente(f"Arquivo auxiliar grande demais: {nome}")
-        arquivos[str(nome)] = str(conteudo)
+            raise ErroAssistente(f"Arquivo auxiliar grande demais: {arq}")
+        arquivos[str(arq)] = str(conteudo)
     dockerfile = d.get("dockerfile")
     if dockerfile is not None:
         dockerfile = str(dockerfile).replace("\r\n", "\n")
@@ -250,10 +269,10 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao]) -> dict:
             "dockerfile": dockerfile, "arquivos": arquivos if dockerfile else {}}
 
 
-def criar(cfg: Config, solucoes: dict[str, Solucao], dados: dict) -> dict:
-    """Grava dados/solucoes-locais/<id>/ (manifesto + Dockerfile), validado pelo mesmo leitor do catalogo."""
-    d = _limpar(dados, cfg, solucoes)
-    toml = gerar_manifesto(d, com_dockerfile=bool(d["dockerfile"]))
+FIXOS = {"solucao.toml", "Dockerfile", "Dockerfile.dockerignore"}
+
+
+def _validar_gerado(d: dict, toml: str) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         teste = Path(tmp) / d["id"]
         teste.mkdir()
@@ -264,15 +283,87 @@ def criar(cfg: Config, solucoes: dict[str, Solucao], dados: dict) -> dict:
             carregar_manifesto(teste / "solucao.toml")
         except ManifestoInvalido as exc:
             raise ErroAssistente(f"O manifesto gerado não passou na validação: {str(exc).split(': ', 1)[-1]}") from exc
-    destino = cfg.pasta_solucoes_locais / d["id"]
-    destino.mkdir(parents=True)
-    (destino / "solucao.toml").write_text(toml, encoding="utf-8")
+
+
+def _gravar(destino: Path, d: dict, toml: str) -> None:
+    """Escreve a pasta da solucao; arquivos auxiliares que nao fazem mais parte sao apagados."""
+    destino.mkdir(parents=True, exist_ok=True)
+    manter = {"solucao.toml"}
     if d["dockerfile"]:
         (destino / "Dockerfile").write_text(d["dockerfile"], encoding="utf-8")
         (destino / "Dockerfile.dockerignore").write_text(DOCKERIGNORE, encoding="utf-8")
         for nome, conteudo in d["arquivos"].items():
             (destino / nome).write_text(conteudo, encoding="utf-8")
+        manter |= {"Dockerfile", "Dockerfile.dockerignore", *d["arquivos"]}
+    for velho in destino.iterdir():
+        if velho.is_file() and velho.name not in manter:
+            velho.unlink()
+    # O manifesto por ultimo: se algo falhar antes, o catalogo continua com o anterior.
+    tmp = destino / "solucao.toml.novo"
+    tmp.write_text(toml, encoding="utf-8")
+    tmp.replace(destino / "solucao.toml")
+
+
+def criar(cfg: Config, solucoes: dict[str, Solucao], dados: dict) -> dict:
+    """Grava dados/solucoes-locais/<id>/ (manifesto + Dockerfile), validado pelo mesmo leitor do catalogo."""
+    d = _limpar(dados, cfg, solucoes)
+    toml = gerar_manifesto(d, com_dockerfile=bool(d["dockerfile"]))
+    _validar_gerado(d, toml)
+    _gravar(cfg.pasta_solucoes_locais / d["id"], d, toml)
     return {"id": d["id"], "manifesto": toml, "dockerfile": d["dockerfile"], "arquivos": sorted(d["arquivos"])}
+
+
+def editar(cfg: Config, solucoes: dict[str, Solucao], sid: str, dados: dict) -> dict:
+    """Regrava uma solucao criada pelo assistente. O id nao muda; vale no proximo Reiniciar/Atualizar."""
+    pasta = cfg.pasta_solucoes_locais / sid
+    if not ID_RE.match(sid) or not (pasta / "solucao.toml").is_file():
+        raise ErroAssistente("Só dá para editar aqui as soluções criadas pelo assistente neste servidor.")
+    d = _limpar({**dados, "id": sid}, cfg, solucoes, editando=sid)
+    toml = gerar_manifesto(d, com_dockerfile=bool(d["dockerfile"]))
+    _validar_gerado(d, toml)
+    _gravar(pasta, d, toml)
+    return {"id": sid, "manifesto": toml, "dockerfile": d["dockerfile"], "arquivos": sorted(d["arquivos"])}
+
+
+def para_edicao(cfg: Config, sol: Solucao) -> dict:
+    """Os valores atuais da solucao no formato que a tela do assistente usa."""
+    pasta = cfg.pasta_solucoes_locais / sol.id
+    if not sol.local or not (pasta / "solucao.toml").is_file():
+        raise ErroAssistente("Só dá para editar aqui as soluções criadas pelo assistente neste servidor.")
+    bruto = tomllib.loads((pasta / "solucao.toml").read_text(encoding="utf-8"))
+    df = pasta / "Dockerfile"
+    auxiliares = {p.name: p.read_text(encoding="utf-8") for p in sorted(pasta.iterdir())
+                  if p.is_file() and p.name not in FIXOS and not p.name.endswith(".novo")}
+    return {
+        "id": sol.id, "nome": sol.nome, "resumo": sol.resumo, "categoria": sol.categoria, "responsavel": sol.responsavel,
+        "tecnologia": str(bruto.get("tecnologia", "")),
+        "repositorio": sol.repositorio, "ref": sol.ref, "subpasta": "" if sol.subpasta == "." else sol.subpasta,
+        "porta_container": sol.porta_container, "porta_host": sol.porta_host, "caminho_saude": sol.caminho_saude,
+        "ambiente": dict(sol.ambiente), "volumes": dict(sol.volumes), "segredos": list(sol.segredos),
+        "configuracoes": [{"nome": c.nome, "rotulo": c.rotulo, "tipo": c.tipo, "padrao": c.padrao, "ajuda": c.ajuda,
+                           "obrigatoria": c.obrigatoria} for c in sol.configuracoes],
+        "banco": dict(sol.banco) if sol.banco else None, "usar_banco": bool(sol.banco),
+        "tem_dockerfile": not df.is_file(), "dockerfile": df.read_text(encoding="utf-8") if df.is_file() else None,
+        "arquivos": auxiliares,
+    }
+
+
+def zip_arquivos(cfg: Config, sid: str) -> bytes:
+    """A pasta pronta para o Git: solucoes/<id>/... dentro de um .zip."""
+    import io
+    import zipfile
+
+    conteudo = arquivos(cfg, sid)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
+        for nome, texto in conteudo.items():
+            if nome.endswith(".novo"):
+                continue
+            info = zipfile.ZipInfo(f"solucoes/{sid}/{nome}", date_time=time.localtime()[:6])
+            info.external_attr = (0o755 if nome == "portal-saude" else 0o644) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, texto)
+    return buffer.getvalue()
 
 
 def arquivos(cfg: Config, sid: str) -> dict:

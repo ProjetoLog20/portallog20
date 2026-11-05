@@ -693,3 +693,19 @@ body:has(.barra-selecao:not([hidden])) .toast { bottom: 92px; }
 .campo-check > span small { color: var(--suave); font-size: 12.5px; font-weight: 400; }
 .painel.criada { border-left: 4px solid var(--ok); }
 .painel.criada p { max-width: 72ch; }
+.tabela-cfg td { vertical-align: top; }
+.tabela-cfg input[type="text"], .tabela-cfg select {
+  width: 100%; min-height: 34px; padding: 5px 8px; font: inherit; font-size: 13.5px;
+  border: 1px solid var(--linha-forte); border-radius: var(--raio-p); background: var(--superficie); color: var(--texto);
+}
+.tabela-cfg input:disabled { background: var(--superficie-2); }
+.tabela-cfg .cfg-nome { font-family: var(--mono); font-size: 12.5px; min-width: 190px; }
+.tabela-cfg .cfg-ajuda { display: block; margin-top: 4px; color: var(--suave); font-size: 12px; max-width: 46ch; }
+.tabela-cfg tr.detectada td:first-child { box-shadow: inset 3px 0 0 var(--cobre); }
+.campo small.sem-topo { margin: -2px 0 8px; }
+.lista-novas { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.lista-novas small { color: var(--suave); }
+.saida.curta { height: auto; max-height: 320px; margin-top: 8px; }
+.topo-ajuste { margin: -6px 0 14px; font-size: 14px; }
+#ns-reanalise { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
+#ns-reanalise:empty { display: none; }
