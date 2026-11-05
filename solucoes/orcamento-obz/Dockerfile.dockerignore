@@ -1,0 +1,25 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+**/node_modules
+**/__pycache__
+**/*.pyc
+.venv
+venv
+*.sqlite3
+*.db
+.DS_Store
+.idea
+.vscode
+# Dados financeiros e pessoais: nunca entram na imagem
+*.xlsx
+*.xls
+*.xlsm
+media
+staticfiles
+logs
+backups
+*.dump
+*.backup

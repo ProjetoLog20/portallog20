@@ -1,0 +1,99 @@
+# Orcamento OBZ (Django). Codigo: JungGustavo/log20-orcamento_obz, branch master, sem alteracoes:
+# o Dockerfile, a configuracao do portal e o script de inicio ficam nesta pasta.
+
+id = "orcamento-obz"
+nome = "Orçamento OBZ"
+resumo = "Elaboração do orçamento anual (Base Zero): premissas, cálculo, FINAME e DRE em Excel."
+categoria = "Financeiro"
+versao = "1.0.0"
+responsavel = "Controladoria LOG20"
+tags = ["financeiro", "orcamento", "django"]
+segredos = ["SECRET_KEY"]
+descricao = """
+Sistema de Orçamento Base Zero da LOG20 (exercício 2027): cadastros, premissas por centro de
+custo, cálculo, rateio, FINAME e exportação da DRE em Excel.
+
+Tem login próprio. O primeiro administrador é criado ao iniciar, com o usuário e a senha
+preenchidos em Configurações; os demais usuários são criados dentro do sistema
+(Administração). Os dados ficam num banco só do Orçamento, no PostgreSQL do servidor, e os
+arquivos importados ficam num volume; os dois são mantidos ao atualizar ou reiniciar.
+"""
+
+[build]
+repositorio = "https://github.com/JungGustavo/log20-orcamento_obz.git"
+ref = "master"
+dockerfile_portal = "Dockerfile"
+
+[execucao]
+porta_container = 8000
+porta_host = 8105
+caminho_saude = "/entrar/"
+caminho_abrir = "/"
+
+[execucao.ambiente]
+# A configuracao de rede do projeto le os hosts permitidos de REDE_HOSTS.
+REDE_HOSTS = "{host},127.0.0.1,localhost"
+CSRF_TRUSTED_ORIGINS = "{url}"
+TZ = "America/Sao_Paulo"
+
+[execucao.volumes]
+# Planilhas importadas (guardadas pelo sistema para conferência).
+arquivos = "/app/media"
+
+# Banco no PostgreSQL do servidor: na primeira instalacao o portal cria o banco e o usuario
+# do Orcamento e preenche os campos DB_* abaixo (so se ainda estiverem no padrao).
+[banco]
+tipo = "postgres"
+
+[banco.configuracoes]
+DB_HOST = "{db_host}"
+DB_PORT = "{db_porta}"
+DB_NAME = "{db_nome}"
+DB_USER = "{db_usuario}"
+DB_PASSWORD = "{db_senha}"
+
+[[configuracoes]]
+nome = "DJANGO_SUPERUSER_USERNAME"
+rotulo = "Primeiro administrador: usuário"
+tipo = "texto"
+padrao = "admin"
+ajuda = "Criado no próximo início se ainda não existir. Depois de criado, mudar estes campos não altera a conta."
+
+[[configuracoes]]
+nome = "DJANGO_SUPERUSER_EMAIL"
+rotulo = "Primeiro administrador: e-mail"
+tipo = "texto"
+
+[[configuracoes]]
+nome = "DJANGO_SUPERUSER_PASSWORD"
+rotulo = "Primeiro administrador: senha"
+tipo = "segredo"
+obrigatoria = true
+ajuda = "Usada só para criar a conta. Depois troque a senha dentro do sistema."
+
+[[configuracoes]]
+nome = "DB_HOST"
+rotulo = "Banco PostgreSQL: servidor"
+tipo = "texto"
+ajuda = "Preenchido pelo portal com o banco do servidor (log20-postgres)."
+
+[[configuracoes]]
+nome = "DB_PORT"
+rotulo = "Banco PostgreSQL: porta"
+tipo = "texto"
+padrao = "5432"
+
+[[configuracoes]]
+nome = "DB_NAME"
+rotulo = "Banco PostgreSQL: nome do banco"
+tipo = "texto"
+
+[[configuracoes]]
+nome = "DB_USER"
+rotulo = "Banco PostgreSQL: usuário"
+tipo = "texto"
+
+[[configuracoes]]
+nome = "DB_PASSWORD"
+rotulo = "Banco PostgreSQL: senha"
+tipo = "segredo"

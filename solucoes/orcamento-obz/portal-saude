@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+# Gerado pelo Portal LOG20: a aplicação esta no ar se responder com qualquer código abaixo de 500.
+import sys, urllib.error, urllib.request
+try:
+    urllib.request.urlopen(sys.argv[1], timeout=4)
+except urllib.error.HTTPError as erro:
+    sys.exit(0 if erro.code < 500 else 1)
+except Exception:
+    sys.exit(1)
