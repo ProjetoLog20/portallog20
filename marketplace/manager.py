@@ -156,6 +156,28 @@ class Armazenamento:
             self.gravar(sol.id, dados)
             return preenchidas
 
+    def restaurar_banco(self, sol: Solucao) -> bool:
+        """Volta as configuracoes do banco para o PostgreSQL do servidor.
+
+        Com o banco ja criado, regrava os campos com as credenciais guardadas; sem ele, apaga os
+        campos para o proximo Iniciar criar o banco e preencher. Devolve True se ja havia banco.
+        """
+        with self._lock:
+            dados = self.ler(sol.id)
+            guardado = dados.get("banco") or {}
+            salvos = dados["configuracoes"]
+            if guardado.get("nome"):
+                cred = banco_pg.Credenciais(host=guardado.get("servidor", ""), porta=banco_pg.PORTA,
+                                            nome=guardado["nome"], usuario=guardado["usuario"],
+                                            senha=guardado["senha"])
+                salvos.update(banco_pg.preencher(sol.banco, cred))
+                guardado["configurado"] = True
+            else:
+                for nome in sol.banco:
+                    salvos.pop(nome, None)
+            self.gravar(sol.id, dados)
+            return bool(guardado.get("nome"))
+
     def limpar_segredo(self, sol: Solucao, nome: str) -> None:
         with self._lock:
             dados = self.ler(sol.id)
@@ -319,7 +341,12 @@ class Gerenciador:
                                             porta=banco_pg.PORTA, nome=guardado["nome"],
                                             usuario=guardado["usuario"], senha=guardado["senha"])
             if not self.armazenamento.banco_em_uso(sol, banco_pg.preencher(sol.banco, anterior)):
-                tarefa.registrar("Banco: as configuracoes apontam para outro banco; o banco do servidor nao e usado.")
+                atuais = self.armazenamento.configuracoes(sol)
+                if any(not atuais.get(n) for n in sol.banco):
+                    tarefa.registrar("Banco: ha campos do banco vazios. Para voltar ao banco do servidor, "
+                                     "use 'Usar o banco do servidor' em Configuracoes e inicie de novo.")
+                else:
+                    tarefa.registrar("Banco: as configuracoes apontam para outro banco; o banco do servidor nao e usado.")
                 return
         elif self.armazenamento.banco_personalizado(sol, sol.banco):
             tarefa.registrar("Banco: as configuracoes ja apontam para outro banco e foram mantidas.")

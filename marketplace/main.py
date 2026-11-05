@@ -350,6 +350,7 @@ def api_detalhe(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
         "banco": (lambda b: {"nome": b["nome"], "usuario": b["usuario"], "servidor": b.get("servidor", "")}
                   if b else None)(ger().armazenamento.banco(sol.id)) if sol.banco else None,
         "url_padrao": f"{CFG.url_base}:{sol.porta_host}",
+        "campos_banco": sorted(sol.banco) if sol.banco else [],
         "local": sol.local,
         "dockerfile_portal": bool(sol.dockerfile_portal),
         "acessos_demo": [vars(a) for a in sol.acessos_demo],
@@ -405,6 +406,17 @@ def api_configurar(sid: str, valores: dict = Body(..., embed=True), _: Usuario =
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "aviso": "Reinicie a solucao para aplicar as mudancas."}
+
+
+@app.post("/api/solucoes/{sid}/banco/restaurar")
+def api_restaurar_banco(sid: str, autor: Usuario = Depends(exigir_admin)) -> dict:
+    sol = _solucao(sid)
+    if not sol.banco:
+        raise HTTPException(400, "Esta solucao nao usa o banco do servidor.")
+    ja_havia = ger().armazenamento.restaurar_banco(sol)
+    AUTH.registrar(autor, "Voltou a solução para o banco do servidor", sid)
+    return {"ok": True, "aviso": "Reinicie a solucao para aplicar." if ja_havia
+            else "O banco sera criado e preenchido no proximo Iniciar."}
 
 
 @app.delete("/api/solucoes/{sid}/configuracoes/{nome}")

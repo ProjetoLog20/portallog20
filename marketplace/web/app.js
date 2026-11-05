@@ -701,14 +701,30 @@ function montarFormulario(form, sol) {
         }), ajuda));
     }
   }
-  form.append(h("div", { class: "linha-botoes" }, h("button", { type: "submit", class: "botao primario" }, "Salvar configurações")));
+  const restaurarBanco = sol.campos_banco?.length ? h("button", {
+    type: "button", class: "botao sutil",
+    onclick: async () => {
+      if (!(await confirmar({ titulo: "Usar o banco do servidor?", texto: `Os campos ${sol.campos_banco.join(", ")} voltam a apontar para o banco desta solução no PostgreSQL do servidor. Os dados do banco não mudam.`, botao: "Usar o banco do servidor" }))) return;
+      try {
+        const r = await api(`/api/solucoes/${sol.id}/banco/restaurar`, { method: "POST" });
+        montarFormulario(form, await api(`/api/solucoes/${sol.id}`));
+        toast(r.aviso);
+      } catch (e) { toast(e.message, "erro"); }
+    },
+  }, "Usar o banco do servidor") : null;
+  form.append(h("div", { class: "linha-botoes" }, h("button", { type: "submit", class: "botao primario" }, "Salvar configurações"), restaurarBanco));
   form.onsubmit = async (ev) => {
     ev.preventDefault();
+    // Envia só o que foi mudado nesta tela: assim um formulário aberto antes de uma operação
+    // (ex.: o portal preencheu o banco ao iniciar) não apaga os valores gravados depois.
     const valores = {};
     for (const c of sol.configuracoes) {
       const input = form.elements[c.nome];
-      valores[c.nome] = c.tipo === "booleano" ? input.checked : input.value;
+      if (c.tipo === "booleano") { if (input.checked !== (c.valor === "true")) valores[c.nome] = input.checked; }
+      else if (c.tipo === "segredo") { if (input.value) valores[c.nome] = input.value; }
+      else if (input.value !== (c.valor ?? "")) valores[c.nome] = input.value;
     }
+    if (!Object.keys(valores).length) { toast("Nada mudou."); return; }
     try {
       const r = await api(`/api/solucoes/${sol.id}/configuracoes`, { method: "PUT", body: { valores } });
       montarFormulario(form, await api(`/api/solucoes/${sol.id}`));
