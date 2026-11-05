@@ -1,5 +1,9 @@
 # Publicar uma nova solução no portal
 
+> **Mais fácil:** no portal, **Soluções → Nova solução** analisa o repositório, aponta o que
+> precisa de ajuste e gera o manifesto e o Dockerfile. Este modelo é para quem prefere
+> escrever o manifesto à mão e publicá-lo pelo Git.
+
 O manifesto (`solucao.toml`) diz ao portal **de onde vem o código** e **como rodar**. O modelo
 comentado está em [`solucao/solucao.toml`](solucao/solucao.toml).
 

@@ -50,6 +50,11 @@ class Config:
     # PostgreSQL do servidor (container na mesma rede das solucoes); vazio = sem banco gerenciado.
     postgres_container: str = ""
 
+    @property
+    def pasta_solucoes_locais(self) -> Path:
+        """Solucoes criadas pelo assistente neste servidor (fora do Git)."""
+        return self.pasta_dados / "solucoes-locais"
+
 
 def carregar() -> Config:
     return Config(

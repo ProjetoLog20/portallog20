@@ -153,6 +153,14 @@ function baixarCsv(nome, linhas) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
 }
 
+function baixarTexto(nome, texto) {
+  const url = URL.createObjectURL(new Blob([texto], { type: "text/plain;charset=utf-8" }));
+  const a = h("a", { href: url, download: nome, hidden: true });
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+
 function hojeIso() { return new Date().toISOString().slice(0, 10); }
 
 function painelSenha(titulo, senha, extra) {
@@ -222,7 +230,7 @@ function montarTopo() {
     menu.append(item("#/", "Meus sistemas", rota === "#/"));
     if (eu.perfil === "admin") {
       menu.append(h("span", { class: "menu-divisa", "aria-hidden": "true" }),
-        item("#/admin/solucoes", "Soluções", rota.startsWith("#/admin/solucao")),
+        item("#/admin/solucoes", "Soluções", rota.startsWith("#/admin/solucao") || rota === "#/admin/nova-solucao"),
         item("#/admin/usuarios", "Usuários", rota === "#/admin/usuarios"),
         item("#/admin/acessos", "Acessos", rota === "#/admin/acessos"));
     }
@@ -461,7 +469,8 @@ async function telaSolucoes() {
             } catch (e) { toast(e.message, "erro"); }
             botao.disabled = false;
           },
-        }, "Recarregar catálogo"))),
+        }, "Recarregar catálogo"),
+        h("a", { class: "botao primario", href: "#/admin/nova-solucao" }, "Nova solução"))),
     h("div", { id: "erros-catalogo" }),
     h("div", { class: "filtros", id: "filtros-solucoes", role: "group", "aria-label": "Filtrar por situação" }),
     h("div", { class: "lista-solucoes", id: "grade-solucoes" }));
@@ -516,7 +525,8 @@ async function atualizarSolucoes() {
     return h("article", { class: "linha-solucao", "data-estado": sol.status.estado },
       logoSistema(sol, "medio"),
       h("div", { class: "linha-solucao-info" },
-        h("h2", {}, h("a", { href: `#/admin/solucao/${sol.id}` }, sol.nome)),
+        h("h2", {}, h("a", { href: `#/admin/solucao/${sol.id}` }, sol.nome),
+          sol.local ? h("span", { class: "etiqueta", title: "Criada pelo assistente neste servidor (fora do Git)" }, "Neste servidor") : null),
         h("p", {}, sol.resumo)),
       h("div", { class: "linha-solucao-estado" },
         pilula(sol.status.estado),
@@ -542,9 +552,19 @@ async function telaSolucao(id) {
   const ficha = h("dl", { class: "ficha" },
     [["Endereço", h("a", { href: sol.url, target: "_blank", rel: "noopener" }, sol.url)], ["Versão", sol.versao], ["Responsável", sol.responsavel],
      ["Código", repo], ["Instalado", instalada], ["Imagem", sol.imagem], ["Porta", String(sol.porta)],
-     ["Banco", sol.banco ? `${sol.banco.nome} no PostgreSQL do servidor (usuário ${sol.banco.usuario})` : ""]]
+     ["Banco", sol.banco ? `${sol.banco.nome} no PostgreSQL do servidor (usuário ${sol.banco.usuario})` : ""],
+     ["Dockerfile", sol.dockerfile_portal ? "Gerado pelo assistente, guardado no portal" : ""],
+     ["Origem", sol.local ? "Criada pelo assistente neste servidor (fora do Git do portal)" : ""]]
       .filter(([, v]) => v)
       .map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]));
+  const blocoLocal = sol.local
+    ? h("div", { class: "bloco" },
+        h("h3", {}, "Levar para outros servidores"),
+        h("p", { class: "nota" }, `Esta solução só existe neste servidor. Para publicá-la nos outros, baixe os arquivos, coloque-os em solucoes/${sol.id}/ no repositório do portal e remova esta cópia daqui.`),
+        h("div", { class: "linha-botoes topo-8" },
+          h("button", { type: "button", class: "botao pequeno", onclick: () => baixarArquivosLocais(sol.id) }, "Baixar arquivos"),
+          h("button", { type: "button", class: "botao pequeno perigo", onclick: () => removerLocal(sol) }, "Remover do catálogo")))
+    : null;
 
   const demo = sol.acessos_demo.length
     ? h("div", { class: "bloco" },
@@ -577,7 +597,7 @@ async function telaSolucao(id) {
   const paineis = {
     geral: h("div", { class: "aba-painel colunas" },
       h("section", { class: "painel" }, h("h2", {}, "Sobre"), h("p", { class: "descricao" }, sol.descricao || sol.resumo), demo),
-      h("section", { class: "painel" }, h("h2", {}, "Ficha técnica"), ficha)),
+      h("section", { class: "painel" }, h("h2", {}, "Ficha técnica"), ficha, blocoLocal)),
     config: h("div", { class: "aba-painel" },
       h("section", { class: "painel estreito" }, h("h2", {}, "Configurações"),
         h("p", { class: "nota topo" }, "Viram variáveis de ambiente da solução. As mudanças valem depois de Reiniciar."), formConfig)),
@@ -1285,6 +1305,215 @@ async function pintarHistorico() {
   pintar();
 }
 
+/* ================= admin: assistente "Nova solução" ================= */
+
+async function baixarArquivosLocais(id) {
+  try {
+    const arquivos = await api(`/api/solucoes/${id}/arquivos-locais`);
+    Object.entries(arquivos).forEach(([nome, texto], i) => setTimeout(() => baixarTexto(nome, texto), i * 300));
+    toast(`${plural(Object.keys(arquivos).length, "arquivo baixado", "arquivos baixados")}: coloque-os em solucoes/${id}/ no repositório do portal.`);
+  } catch (e) { toast(e.message, "erro"); }
+}
+
+async function removerLocal(sol) {
+  if (!(await confirmar({
+    titulo: `Remover ${sol.nome} do catálogo?`,
+    texto: "O manifesto criado pelo assistente é apagado deste servidor. Antes, pare e remova o container. Os volumes e o banco da solução não são apagados.",
+    botao: "Remover do catálogo", perigo: true,
+  }))) return;
+  try {
+    await api(`/api/solucoes/${sol.id}/local`, { method: "DELETE" });
+    toast(`${sol.nome} removida do catálogo.`);
+    location.hash = "#/admin/solucoes";
+  } catch (e) { toast(e.message, "erro"); }
+}
+
+const NIVEIS = { erro: "Resolver antes de usar com dados reais", atencao: "Atenção", info: "Para saber" };
+
+/** "A=1\nB=2" <-> {A: "1", B: "2"} */
+function paraLinhas(obj) { return Object.entries(obj || {}).map(([k, v]) => `${k}=${v}`).join("\n"); }
+function deLinhas(texto) {
+  const obj = {};
+  for (const linha of texto.split("\n")) {
+    const i = linha.indexOf("=");
+    if (i > 0) obj[linha.slice(0, i).trim()] = linha.slice(i + 1).trim();
+  }
+  return obj;
+}
+
+function telaNovaSolucao() {
+  const erro = h("p", { class: "form-erro", role: "alert", hidden: true });
+  const form = h("form", { class: "config" },
+    h("div", { class: "campo" }, h("label", { for: "ns-repo" }, "Repositório Git"),
+      h("input", { id: "ns-repo", name: "repositorio", type: "text", required: true, autocomplete: "off",
+        placeholder: "https://github.com/empresa/projeto.git" }),
+      h("small", {}, "Endereço HTTPS. Se for privado, o repositório precisa estar no token de leitura deste servidor.")),
+    h("div", { class: "form-grade" },
+      h("div", { class: "campo" }, h("label", { for: "ns-ref" }, "Branch ou tag"),
+        h("input", { id: "ns-ref", name: "ref", type: "text", value: "main", autocomplete: "off" })),
+      h("div", { class: "campo" }, h("label", { for: "ns-sub" }, "Subpasta (opcional)"),
+        h("input", { id: "ns-sub", name: "subpasta", type: "text", autocomplete: "off", placeholder: "ex.: backend" }),
+        h("small", {}, "Quando o sistema fica numa pasta dentro do repositório."))),
+    erro,
+    h("div", { class: "linha-botoes" }, h("button", { type: "submit", class: "botao primario" }, "Analisar repositório")));
+  const resultado = h("div", { id: "ns-resultado" });
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    erro.hidden = true;
+    const botao = form.querySelector("button[type=submit]");
+    botao.disabled = true;
+    botao.replaceChildren(h("span", { class: "giro", "aria-hidden": "true" }), "Baixando e analisando…");
+    resultado.replaceChildren(h("p", { class: "nota" }, "Baixando o código e procurando a tecnologia. Pode levar até um minuto em repositórios grandes."));
+    try {
+      const an = await api("/api/assistente/analisar", {
+        method: "POST", body: { repositorio: form.repositorio.value.trim(), ref: form.ref.value.trim() || "main", subpasta: form.subpasta.value.trim() },
+      });
+      pintarAnalise(resultado, an);
+      resultado.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (e) {
+      resultado.replaceChildren();
+      erro.textContent = e.message;
+      erro.hidden = false;
+    } finally {
+      botao.disabled = false;
+      botao.textContent = "Analisar de novo";
+    }
+  });
+  $conteudo.replaceChildren(
+    h("a", { class: "voltar", href: "#/admin/solucoes" }, "Todas as soluções"),
+    h("section", { class: "intro" },
+      h("h1", {}, "Nova solução"),
+      h("p", {}, "Informe o repositório: o portal baixa o código, descobre a tecnologia, prepara o Dockerfile e aponta o que precisa de ajuste. Nada é instalado até você confirmar.")),
+    h("section", { class: "painel estreito" }, h("h2", {}, "1. Repositório"), form),
+    resultado);
+  form.repositorio.focus();
+}
+
+function pintarAnalise(alvo, an) {
+  const o = an.origem;
+  const avisos = an.avisos.length
+    ? h("ul", { class: "avisos-lista" }, an.avisos.map((a) => h("li", { class: `aviso-item ${a.nivel}` },
+        h("span", { class: "aviso-nivel" }, NIVEIS[a.nivel] || a.nivel),
+        h("strong", {}, a.titulo),
+        h("p", {}, a.detalhe),
+        a.arquivos.length ? h("p", { class: "aviso-arquivos" }, a.arquivos.map((f) => h("code", {}, f))) : null)))
+    : h("p", { class: "texto-ok" }, "Nenhum problema encontrado.");
+  const cabecalho = h("section", { class: "painel" },
+    h("h2", {}, "2. O que o portal encontrou"),
+    h("div", { class: "deteccao" },
+      h("div", {},
+        h("span", { class: "deteccao-rotulo" }, "Tecnologia"),
+        h("strong", { class: "deteccao-valor" }, an.nome_tecnologia),
+        h("small", {}, an.evidencias.length ? `Pelos arquivos: ${an.evidencias.join(", ")}` : "")),
+      h("div", {},
+        h("span", { class: "deteccao-rotulo" }, "Como vai rodar"),
+        h("strong", { class: "deteccao-valor" }, an.comando || "—"),
+        h("small", {}, an.tem_dockerfile ? "Usa o Dockerfile do repositório." : an.dockerfile ? "Dockerfile gerado pelo portal (revise abaixo)." : "")),
+      h("div", {},
+        h("span", { class: "deteccao-rotulo" }, "Código"),
+        h("strong", { class: "deteccao-valor" }, `${o.ref} · ${o.commit}`),
+        h("small", {}, o.resumo_commit))),
+    h("h3", { class: "topo-16" }, "Pontos de atenção"), avisos);
+
+  if (!an.suportado) {
+    alvo.replaceChildren(cabecalho, h("div", { class: "vazio" },
+      h("strong", {}, "Este projeto não pode ser preparado automaticamente"),
+      h("p", {}, "Peça a quem desenvolveu um Dockerfile, ou confira se o branch e a subpasta estão certos.")));
+    return;
+  }
+
+  const campo = (id, rotulo, valor, extra = {}, ajuda = "") => h("div", { class: "campo" },
+    h("label", { for: id }, rotulo),
+    h("input", { id, name: id, type: extra.type || "text", value: valor ?? "", autocomplete: "off", ...extra }),
+    ajuda ? h("small", {}, ajuda) : null);
+  const erro = h("p", { class: "form-erro", role: "alert", hidden: true });
+  const dockerfile = an.tem_dockerfile ? null : h("textarea", { id: "ns-dockerfile", class: "codigo", rows: 16, spellcheck: false }, an.dockerfile || "");
+  const usarBanco = an.banco ? h("label", { class: "campo-check" },
+    h("input", { type: "checkbox", id: "ns-banco", checked: true }),
+    h("span", {}, h("strong", {}, "Usar o banco PostgreSQL do servidor"),
+      h("small", {}, ` O projeto lê ${Object.keys(an.banco).join(", ")}: o portal cria um banco só para ele e preenche a conexão.`))) : null;
+
+  const form = h("form", { class: "config", id: "ns-form" },
+    h("div", { class: "form-grade" },
+      campo("ns-nome", "Nome", an.nome_sugerido, { required: true, maxlength: 120 }),
+      campo("ns-id", "Identificador", an.id_sugerido, { required: true, pattern: "[a-z0-9][a-z0-9\\-]{1,40}" }, "Minúsculas e hífens. Vira o nome do container; não muda depois."),
+      campo("ns-categoria", "Área", "Geral", { maxlength: 60 }, "Ex.: Recursos Humanos, Operação, Financeiro.")),
+    campo("ns-resumo", "Resumo", an.resumo_sugerido, { maxlength: 200 }, "Uma frase sobre o que o sistema faz. Aparece em Meus sistemas."),
+    h("div", { class: "form-grade" },
+      campo("ns-porta-host", "Porta pública", an.porta_host, { type: "number" }, "A primeira livre da faixa do servidor."),
+      campo("ns-porta", "Porta da aplicação", an.porta_container, { type: "number" }, "Onde o sistema escuta dentro do container."),
+      campo("ns-saude", "Rota de saúde", an.caminho_saude, {}, "O portal testa esta rota para saber se está no ar.")),
+    usarBanco,
+    dockerfile ? h("div", { class: "campo" },
+      h("label", { for: "ns-dockerfile" }, "Dockerfile"),
+      dockerfile,
+      h("small", {}, "Fica guardado no portal: o repositório de quem desenvolveu não muda. Ajuste se precisar.",
+        Object.keys(an.arquivos || {}).length ? ` Junto vão os arquivos auxiliares ${Object.keys(an.arquivos).join(", ")} (usados nas linhas COPY --from=portal).` : "")) : null,
+    h("details", { class: "avancado" },
+      h("summary", {}, "Variáveis, volumes e segredos"),
+      h("div", { class: "config topo-16" },
+        h("div", { class: "campo" }, h("label", { for: "ns-amb" }, "Variáveis de ambiente fixas"),
+          h("textarea", { id: "ns-amb", class: "codigo", rows: 4, spellcheck: false }, paraLinhas(an.ambiente)),
+          h("small", {}, "Uma por linha, NOME=valor. {url} vira o endereço público e {host}, só o IP ou nome.")),
+        h("div", { class: "campo" }, h("label", { for: "ns-vol" }, "Pastas que guardam dados (volumes)"),
+          h("textarea", { id: "ns-vol", class: "codigo", rows: 2, spellcheck: false }, paraLinhas(an.volumes)),
+          h("small", {}, "Uma por linha, apelido=/caminho/no/container. O resto do container é refeito a cada atualização.")),
+        campo("ns-segredos", "Segredos gerados pelo portal", an.segredos.join(", "), {}, "Nomes separados por vírgula (ex.: SECRET_KEY). Valor aleatório, criado uma vez, nunca aparece na tela."))),
+    erro,
+    h("div", { class: "linha-botoes" },
+      h("button", { type: "submit", class: "botao primario" }, "Criar solução"),
+      an.avisos.some((a) => a.nivel === "erro") ? h("small", { class: "texto-erro" }, "Há itens para resolver: dá para criar e testar, mas não use com dados reais antes de corrigir.") : null));
+
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    erro.hidden = true;
+    const botao = form.querySelector("button[type=submit]");
+    botao.disabled = true;
+    const usar = !!form.querySelector("#ns-banco")?.checked;
+    const dados = {
+      repositorio: o.repositorio, ref: o.ref, subpasta: o.subpasta, tecnologia: an.nome_tecnologia,
+      id: form["ns-id"].value.trim(), nome: form["ns-nome"].value, resumo: form["ns-resumo"].value, categoria: form["ns-categoria"].value,
+      porta_host: Number(form["ns-porta-host"].value), porta_container: Number(form["ns-porta"].value), caminho_saude: form["ns-saude"].value.trim(),
+      ambiente: deLinhas(form.querySelector("#ns-amb").value), volumes: deLinhas(form.querySelector("#ns-vol").value),
+      segredos: form["ns-segredos"].value.split(",").map((s) => s.trim()).filter(Boolean),
+      configuracoes: an.configuracoes.filter((c) => usar || !Object.keys(an.banco || {}).includes(c.nome)),
+      banco: an.banco, usar_banco: usar,
+      dockerfile: dockerfile ? dockerfile.value : null,
+      arquivos: an.arquivos || {},
+    };
+    try {
+      const r = await api("/api/assistente/criar", { method: "POST", body: { dados } });
+      pintarCriada(alvo, r, dados);
+    } catch (e) {
+      erro.textContent = e.message;
+      erro.hidden = false;
+      botao.disabled = false;
+    }
+  });
+
+  alvo.replaceChildren(cabecalho, h("section", { class: "painel" }, h("h2", {}, "3. Revise e crie"), form));
+}
+
+function pintarCriada(alvo, r, dados) {
+  alvo.replaceChildren(h("section", { class: "painel criada" },
+    h("h2", {}, `${dados.nome} está no catálogo`),
+    h("p", {}, `Criada neste servidor, na porta ${dados.porta_host}. O próximo passo é instalar: o portal baixa o código, constrói a imagem e sobe o sistema.`),
+    h("div", { class: "linha-botoes" },
+      h("button", {
+        type: "button", class: "botao primario", onclick: async (ev) => {
+          ev.currentTarget.disabled = true;
+          try {
+            await api(`/api/solucoes/${r.id}/acoes/iniciar`, { method: "POST" });
+            location.hash = `#/admin/solucao/${r.id}`;
+          } catch (e) { toast(e.message, "erro"); ev.currentTarget.disabled = false; }
+        },
+      }, "Instalar e iniciar"),
+      h("a", { class: "botao", href: `#/admin/solucao/${r.id}` }, "Ver a solução"),
+      h("button", { type: "button", class: "botao sutil", onclick: () => baixarArquivosLocais(r.id) }, "Baixar arquivos")),
+    h("p", { class: "nota" }, `Para usar em outros servidores, coloque os arquivos baixados em solucoes/${r.id}/ no repositório do portal. Depois, libere o sistema para as pessoas em Acessos.`)));
+  alvo.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 /* ================= navegação ================= */
 
 async function atualizar() {
@@ -1373,6 +1602,7 @@ async function navegar() {
     else if (rota.startsWith("#/admin/solucao/")) { await telaSolucao(rota.split("/")[3]); novoRitmo = [2500, 20000]; }
     else if (rota === "#/admin/usuarios") await telaUsuarios();
     else if (rota === "#/admin/acessos") await telaAcessos();
+    else if (rota === "#/admin/nova-solucao") telaNovaSolucao();
     else { rota = "#/"; await telaMeusSistemas(); novoRitmo = [60000, 60000]; }
   } catch (e) {
     if (e.status === 401 || location.hash.split("?")[0] !== rota) return;

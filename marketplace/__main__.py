@@ -52,7 +52,7 @@ def validar(_: argparse.Namespace) -> int:
 
     cfg = config_mod.carregar()
     faixa = cfg.faixa_portas or config_mod._faixa(FAIXA_PADRAO)
-    solucoes, erros = carregar_catalogo(cfg.pasta_solucoes)
+    solucoes, erros = carregar_catalogo(cfg.pasta_solucoes, cfg.pasta_solucoes_locais)
     avisos: list[str] = []
     for sol in solucoes.values():
         texto = Path(sol.manifesto).read_text(encoding="utf-8")

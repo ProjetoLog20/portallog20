@@ -226,6 +226,9 @@ class Gerenciador:
         try:
             with urllib.request.urlopen(self.url_interna(sol) + sol.caminho_saude, timeout=3) as resp:
                 return resp.status < 500
+        except urllib.error.HTTPError as erro:
+            # Respondeu (ex.: 401/403/404 de uma tela de login): a aplicacao esta no ar.
+            return erro.code < 500
         except (urllib.error.URLError, OSError):
             return False
 
@@ -285,12 +288,16 @@ class Gerenciador:
                 raise docker_cli.DockerError("A subpasta do manifesto aponta para fora do repositorio.")
         else:
             contexto = sol.contexto_build
-        dockerfile = (contexto / sol.dockerfile_nome).resolve()
+        dockerfile = sol.dockerfile_portal or (contexto / sol.dockerfile_nome).resolve()
+        if sol.dockerfile_portal:
+            tarefa.registrar("Usando o Dockerfile guardado pelo portal (o repositorio nao precisa ter um).")
         if not dockerfile.exists():
             raise docker_cli.DockerError(f"Dockerfile nao encontrado em {dockerfile}")
         tarefa.etapa = "Construindo imagem (a primeira vez leva alguns minutos)"
         tarefa.registrar(f"$ docker build -t {sol.imagem} {contexto}")
-        docker_cli.build(contexto, dockerfile, sol.imagem, tarefa.registrar)
+        # Arquivos auxiliares do Dockerfile do portal (ex.: portal-saude) vem da pasta do manifesto.
+        contextos = {"portal": sol.dockerfile_portal.parent} if sol.dockerfile_portal else None
+        docker_cli.build(contexto, dockerfile, sol.imagem, tarefa.registrar, contextos)
         tarefa.registrar("Imagem construida com sucesso.")
         if versao:
             info = {"commit": versao.commit, "resumo": versao.resumo, "data": versao.data, "ref": sol.ref}

@@ -65,7 +65,7 @@ def executar(atualizar: bool = False, reiniciar: bool = False, incluir_paradas: 
         print(f"Docker indisponivel: {st.erro}", file=sys.stderr)
         return 1
 
-    solucoes, erros = carregar_catalogo(cfg.pasta_solucoes)
+    solucoes, erros = carregar_catalogo(cfg.pasta_solucoes, cfg.pasta_solucoes_locais)
     if cfg.faixa_portas:
         inicio, fim = cfg.faixa_portas
         for sid, sol in list(solucoes.items()):

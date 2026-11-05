@@ -112,9 +112,12 @@ def stream(args: list[str], on_line: Callable[[str], None], env: dict[str, str] 
     return proc.wait()
 
 
-def build(context: Path, dockerfile: Path, image: str, on_line: Callable[[str], None]) -> None:
+def build(context: Path, dockerfile: Path, image: str, on_line: Callable[[str], None],
+          contextos: dict[str, Path] | None = None) -> None:
+    """`contextos`: contextos extras do BuildKit (COPY --from=<nome> no Dockerfile)."""
+    extras = [a for nome, pasta in (contextos or {}).items() for a in ("--build-context", f"{nome}={pasta}")]
     code = stream(
-        ["build", "--progress=plain", "-t", image, "-f", str(dockerfile), str(context)],
+        ["build", "--progress=plain", "-t", image, "-f", str(dockerfile), *extras, str(context)],
         on_line,
         env={"DOCKER_BUILDKIT": "1"},
     )

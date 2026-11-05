@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 
 from . import config as config_mod
-from . import docker_cli, proxy
+from . import assistente, docker_cli, proxy
 from .auth import Autenticacao, ErroAuth, ErroLote, Usuario
 from .catalog import Solucao, carregar_catalogo
 from .manager import ACOES, Armazenamento, Gerenciador
@@ -34,7 +34,7 @@ _estado: dict = {}
 
 
 def _carregar() -> None:
-    solucoes, erros = carregar_catalogo(CFG.pasta_solucoes)
+    solucoes, erros = carregar_catalogo(CFG.pasta_solucoes, CFG.pasta_solucoes_locais)
     if CFG.faixa_portas:
         inicio, fim = CFG.faixa_portas
         for sid, sol in list(solucoes.items()):
@@ -303,6 +303,7 @@ def _resumo(sol: Solucao, docker_ok: bool) -> dict:
         "url": ger().url(sol) + sol.caminho_abrir,
         "logo": _logo_url(sol),
         "status": status,
+        "local": sol.local,
     }
 
 
@@ -349,6 +350,8 @@ def api_detalhe(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
         "banco": (lambda b: {"nome": b["nome"], "usuario": b["usuario"], "servidor": b.get("servidor", "")}
                   if b else None)(ger().armazenamento.banco(sol.id)) if sol.banco else None,
         "url_padrao": f"{CFG.url_base}:{sol.porta_host}",
+        "local": sol.local,
+        "dockerfile_portal": bool(sol.dockerfile_portal),
         "acessos_demo": [vars(a) for a in sol.acessos_demo],
         "configuracoes": [
             {
@@ -421,6 +424,63 @@ def api_endereco(sid: str, url_publica: str = Body("", embed=True), _: Usuario =
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "url": ger().url(sol), "aviso": "Reinicie a solucao para aplicar o novo endereco."}
+
+
+# ---------------- administracao: assistente "Nova solucao" ----------------
+
+@app.post("/api/assistente/analisar")
+def api_assistente_analisar(
+    repositorio: str = Body(...), ref: str = Body("main"), subpasta: str = Body(""),
+    _: Usuario = Depends(exigir_admin),
+) -> dict:
+    """Baixa o repositorio, descobre a tecnologia e sugere manifesto, Dockerfile e avisos."""
+    try:
+        return assistente.analisar_repositorio(CFG, ger().solucoes, repositorio, ref, subpasta)
+    except assistente.ErroAssistente as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/assistente/criar", status_code=201)
+def api_assistente_criar(dados: dict = Body(..., embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
+    """Grava a solucao neste servidor (dados/solucoes-locais) e recarrega o catalogo."""
+    ocupadas = [sid for sid, t in ger().tarefas.items() if t.estado == "executando"]
+    if ocupadas:
+        raise HTTPException(409, f"Aguarde as operacoes em andamento: {', '.join(ocupadas)}")
+    try:
+        r = assistente.criar(CFG, ger().solucoes, dados)
+    except assistente.ErroAssistente as exc:
+        raise HTTPException(400, str(exc)) from exc
+    _carregar()
+    if r["id"] not in ger().solucoes:
+        erros = [e for e in _estado["erros"] if r["id"] in e]
+        raise HTTPException(400, f"Arquivos gravados, mas o catálogo recusou a solução: {'; '.join(erros) or 'veja Soluções'}")
+    AUTH.registrar(autor, "Criou solução pelo assistente", f"{r['id']} a partir de {dados.get('repositorio', '')}")
+    return {**r, "proxy": _estado.get("proxy")}
+
+
+@app.get("/api/solucoes/{sid}/arquivos-locais")
+def api_arquivos_locais(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
+    try:
+        return assistente.arquivos(CFG, sid)
+    except assistente.ErroAssistente as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.delete("/api/solucoes/{sid}/local")
+def api_remover_local(sid: str, autor: Usuario = Depends(exigir_admin)) -> dict:
+    """Tira do catalogo uma solucao criada pelo assistente (o container e os dados precisam ser removidos antes)."""
+    sol = ger().solucoes.get(sid)
+    if sol is not None and not sol.local:
+        raise HTTPException(400, "Esta solução vem do repositório do portal; remova o manifesto pelo Git.")
+    if sol is not None and docker_cli.status().ok and docker_cli.container_inspect(sol.container):
+        raise HTTPException(409, "Remova o container antes (Parar e depois Remover container).")
+    try:
+        assistente.remover(CFG, sid)
+    except assistente.ErroAssistente as exc:
+        raise HTTPException(404, str(exc)) from exc
+    _carregar()
+    AUTH.registrar(autor, "Removeu solução criada pelo assistente", sid)
+    return {"ok": True}
 
 
 # ---------------- administracao: usuarios ----------------

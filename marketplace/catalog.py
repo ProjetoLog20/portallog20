@@ -72,6 +72,10 @@ class Solucao:
     subpasta: str = "."
     # Caminhos que abrem SEM login no portal (ex.: links publicos enviados por e-mail).
     caminhos_publicos: list[str] = field(default_factory=list)
+    # Dockerfile guardado com o manifesto (gerado pelo assistente), usado no lugar do do repositorio.
+    dockerfile_portal: Path | None = None
+    # True: manifesto criado pelo assistente neste servidor (dados/solucoes-locais), fora do Git.
+    local: bool = False
     # Banco no PostgreSQL do servidor: {configuracao: modelo com {db_host}, {db_senha}...}.
     # O portal cria banco + usuario e preenche essas configuracoes (so as vazias, uma vez).
     banco: dict[str, str] | None = None
@@ -124,6 +128,11 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         contexto = None
     else:
         contexto = (base / _exigir(build, "contexto", caminho)).resolve()
+    dockerfile_portal = None
+    if build.get("dockerfile_portal"):
+        dockerfile_portal = (base / str(build["dockerfile_portal"])).resolve()
+        if base.resolve() not in dockerfile_portal.parents or not dockerfile_portal.is_file():
+            raise ManifestoInvalido(f"{caminho}: dockerfile_portal deve ser um arquivo dentro da pasta do manifesto")
     dockerfile_nome = str(build.get("dockerfile", "Dockerfile"))
     if Path(dockerfile_nome).is_absolute() or ".." in Path(dockerfile_nome).parts:
         raise ManifestoInvalido(f"{caminho}: dockerfile deve ser um caminho dentro do codigo da solucao")
@@ -225,23 +234,36 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         ref=ref if repositorio else "",
         subpasta=subpasta,
         caminhos_publicos=list(publicos),
+        dockerfile_portal=dockerfile_portal,
         banco=banco,
     )
 
 
-def carregar_catalogo(pasta: Path) -> tuple[dict[str, Solucao], list[str]]:
-    """Le todas as solucoes. Manifestos com erro sao reportados, nao derrubam o portal."""
+def carregar_catalogo(pasta: Path, pasta_local: Path | None = None) -> tuple[dict[str, Solucao], list[str]]:
+    """Le todas as solucoes. Manifestos com erro sao reportados, nao derrubam o portal.
+
+    `pasta` = solucoes/ do repositorio do portal; `pasta_local` = as criadas pelo assistente neste
+    servidor (dados/solucoes-locais). Com o mesmo id nas duas, vale a do repositorio.
+    """
     solucoes: dict[str, Solucao] = {}
     erros: list[str] = []
     portas: dict[int, str] = {}
-    for caminho in sorted(pasta.glob("*/solucao.toml")):
+    caminhos = [(c, False) for c in sorted(pasta.glob("*/solucao.toml"))]
+    if pasta_local and pasta_local.is_dir():
+        caminhos += [(c, True) for c in sorted(pasta_local.glob("*/solucao.toml"))]
+    for caminho, local in caminhos:
         try:
             sol = carregar_manifesto(caminho)
         except (ManifestoInvalido, KeyError, ValueError) as exc:
             erros.append(str(exc))
             continue
+        sol.local = local
         if sol.id in solucoes:
-            erros.append(f"{caminho}: id '{sol.id}' repetido")
+            if local:
+                erros.append(f"{caminho}: a solucao '{sol.id}' ja esta no repositorio do portal; "
+                             "a copia criada neste servidor foi ignorada (pode remove-la)")
+            else:
+                erros.append(f"{caminho}: id '{sol.id}' repetido")
             continue
         if sol.porta_host in portas:
             erros.append(f"{caminho}: porta {sol.porta_host} ja usada por '{portas[sol.porta_host]}'")

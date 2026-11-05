@@ -254,7 +254,28 @@ ou a do usuário de uma solução, que só enxerga o próprio banco).
 Remover uma solução do portal não apaga o banco dela. Para apagar (irreversível):
 `sudo docker compose exec postgres psql -U postgres -c 'DROP DATABASE jornada_lideranca'`.
 
-## Publicar uma nova solução
+## Publicar uma nova solução pelo assistente
+
+Em **Soluções → Nova solução**, informe o repositório (e o branch, e a subpasta se o sistema
+estiver numa pasta dele). O portal baixa o código, **só lê os arquivos** (nada do repositório é
+executado nessa etapa) e mostra:
+
+- a **tecnologia** encontrada: Django, Flask, FastAPI, Streamlit, Node (Express e afins,
+  Next.js, sites React/Vite/Vue), PHP, .NET, Java (Maven/Gradle), HTML estático, ou o
+  Dockerfile do próprio projeto;
+- os **pontos de atenção**: senhas e chaves no código, `.env` ou planilhas com CPF no
+  repositório, HTTPS forçado, `ALLOWED_HOSTS` ou banco fixos no código, endereço `localhost`
+  no frontend, entre outros;
+- um **Dockerfile sugerido** (quando o projeto não tem), a porta, a rota de saúde, as
+  variáveis, os volumes e se dá para usar o banco do servidor. Tudo editável antes de criar.
+
+Ao clicar em **Criar solução**, o manifesto e o Dockerfile ficam em
+`dados/solucoes-locais/<id>/`, **só neste servidor** e fora do Git: o repositório de quem
+desenvolveu não muda. A solução aparece com a etiqueta *Neste servidor*. Para levá-la aos
+outros servidores, use **Baixar arquivos** (na ficha da solução), coloque-os em
+`solucoes/<id>/` no repositório do portal e remova a cópia local (**Remover do catálogo**).
+
+## Publicar uma nova solução (pelo Git)
 
 1. A solução precisa de um repositório Git com um `Dockerfile` que suba a aplicação numa
    porta HTTP e, de preferência, com uma rota de saúde (ex.: `/api/health`).
@@ -275,6 +296,7 @@ topo da tela de Soluções, e o acesso às soluções que já estavam no ar cont
 | `[build] repositorio`, `ref` | Repositório Git (URL `https://`) e branch ou tag de onde o portal clona o código |
 | `[build] subpasta`, `dockerfile` | Pasta dentro do repositório onde fica o `Dockerfile` (padrão: a raiz) |
 | `[build] contexto` | Alternativa ao repositório: pasta local com o código, relativa ao manifesto |
+| `[build] dockerfile_portal` | Dockerfile guardado na pasta do manifesto, usado no lugar do do repositório (o assistente usa) |
 | `[build] imagem` | Nome da imagem Docker; soluções com o mesmo nome compartilham o build |
 | `[execucao] porta_container`, `porta_host` | Porta da aplicação e porta publicada no servidor |
 | `caminho_saude`, `caminho_abrir` | Rota para saber se está no ar e rota aberta pelo botão |
