@@ -18,6 +18,15 @@ PORTAL_GIT_TOKEN=
 # de cada solucao sozinho. So vale na primeira subida do banco; trocar depois nao muda nada.
 PORTAL_POSTGRES_SENHA=
 
+# ---- Limites e uso (tela Uso) ----
+# Limite padrao de cada solucao (o manifesto e a tela Uso mudam por solucao). 0 = sem limite.
+# PORTAL_LIMITE_MEMORIA=1g
+# PORTAL_LIMITE_CPUS=1
+# PORTAL_LIMITE_PROCESSOS=1024
+# Coleta do painel de uso: a cada quantos segundos e quantos dias guardar.
+# PORTAL_USO_INTERVALO=60
+# PORTAL_USO_DIAS=7
+
 # ---- Backup (tela Backups) ----
 # Pasta dos backups nesta maquina. Padrao: a pasta backups/ dentro do portal. Melhor em outro
 # disco, se houver (ex.: /mnt/backup/portal).

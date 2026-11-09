@@ -55,11 +55,33 @@ class Config:
     backup_copia: Path | None = None
     backup_imagem: str = "postgres:17"
     fuso: str = "America/Sao_Paulo"
+    # Limites padrao de cada solucao (0 = sem limite); o manifesto e a tela podem mudar por solucao.
+    limite_memoria_mb: int = 1024
+    limite_cpus: float = 1.0
+    limite_processos: int = 1024
+    # Painel de uso: intervalo da coleta e quantos dias de historico guardar.
+    uso_intervalo_s: int = 60
+    uso_dias: int = 7
 
     @property
     def pasta_solucoes_locais(self) -> Path:
         """Solucoes criadas pelo assistente neste servidor (fora do Git)."""
         return self.pasta_dados / "solucoes-locais"
+
+
+def _limite(texto: str, padrao, tipo: str):
+    """Le PORTAL_LIMITE_*: vazio = padrao; 'sem' ou 0 = sem limite."""
+    from .catalog import cpus_validas, memoria_mb
+
+    texto = texto.strip().lower()
+    if not texto:
+        return padrao
+    if texto in {"sem", "nenhum", "0"}:
+        return 0
+    try:
+        return memoria_mb(texto) if tipo == "memoria" else cpus_validas(texto)
+    except ValueError:
+        return padrao
 
 
 def carregar() -> Config:
@@ -87,6 +109,11 @@ def carregar() -> Config:
         backup_copia=Path(c) if (c := os.environ.get("PORTAL_BACKUP_COPIA", "").strip()) else None,
         backup_imagem=os.environ.get("PORTAL_BACKUP_IMAGEM", "").strip() or "postgres:17",
         fuso=os.environ.get("PORTAL_FUSO", "").strip() or "America/Sao_Paulo",
+        limite_memoria_mb=_limite(os.environ.get("PORTAL_LIMITE_MEMORIA", ""), 1024, "memoria"),
+        limite_cpus=_limite(os.environ.get("PORTAL_LIMITE_CPUS", ""), 1.0, "cpus"),
+        limite_processos=int(os.environ.get("PORTAL_LIMITE_PROCESSOS", "").strip() or 1024),
+        uso_intervalo_s=max(15, int(os.environ.get("PORTAL_USO_INTERVALO", "").strip() or 60)),
+        uso_dias=max(1, int(os.environ.get("PORTAL_USO_DIAS", "").strip() or 7)),
     )
 
 

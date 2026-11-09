@@ -137,6 +137,9 @@ def run_container(
     env: dict[str, str],
     volumes: dict[str, str],
     labels: dict[str, str],
+    memoria_mb: int = 0,
+    cpus: float = 0,
+    processos: int = 0,
 ) -> str:
     """Cria e inicia o container.
 
@@ -151,6 +154,13 @@ def run_container(
         "--name", name,
         "--restart", "unless-stopped",
     ]
+    if memoria_mb:
+        # Sem swap extra: ao passar do limite, o sistema e reiniciado em vez de deixar a VM lenta.
+        args += ["--memory", f"{memoria_mb}m", "--memory-swap", f"{memoria_mb}m"]
+    if cpus:
+        args += ["--cpus", f"{cpus:g}"]
+    if processos:
+        args += ["--pids-limit", str(processos)]
     if publicar:
         args += ["-p", f"{bind}:{host_port}:{container_port}"]
     if rede:
@@ -235,3 +245,45 @@ def de_arquivo(args: list[str], origem: Path, env: dict[str, str] | None = None,
 
 def volume_existe(nome: str) -> bool:
     return _run(["volume", "inspect", nome], timeout=30).returncode == 0
+
+
+def atualizar_limites(nome: str, memoria_mb: int, cpus: float) -> None:
+    """Muda os limites de um container em execucao, sem reiniciar (docker update)."""
+    args = ["update"]
+    if memoria_mb:
+        args += ["--memory", f"{memoria_mb}m", "--memory-swap", f"{memoria_mb}m"]
+    args += ["--cpus", f"{cpus:g}" if cpus else "0"]
+    _check(_run([*args, nome], timeout=60), "Falha ao mudar os limites")
+
+
+def estatisticas() -> list[dict]:
+    """docker stats de todos os containers em execucao (uma amostra, ~2 s)."""
+    r = _run(["stats", "--no-stream", "--format", "{{json .}}"], timeout=60)
+    if r.returncode != 0:
+        raise DockerError((r.stderr or r.stdout).strip()[-400:] or "docker stats falhou")
+    lista = []
+    for linha in r.stdout.splitlines():
+        try:
+            lista.append(json.loads(linha))
+        except ValueError:
+            continue
+    return lista
+
+
+def listar_json(args: list[str], timeout: float = 60) -> list[dict]:
+    """Roda um comando docker com --format '{{json .}}' e devolve uma lista de dicts."""
+    r = _run([*args, "--format", "{{json .}}"], timeout=timeout)
+    if r.returncode != 0:
+        raise DockerError((r.stderr or r.stdout).strip()[-400:] or f"docker {args[0]} falhou")
+    lista = []
+    for linha in r.stdout.splitlines():
+        try:
+            lista.append(json.loads(linha))
+        except ValueError:
+            continue
+    return lista
+
+
+def rodar(args: list[str], timeout: float = 600) -> str:
+    """docker <args>; devolve a saida ou levanta DockerError."""
+    return _check(_run(args, timeout=timeout), f"Falha em docker {args[0]}")

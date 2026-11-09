@@ -254,6 +254,33 @@ ou a do usuário de uma solução, que só enxerga o próprio banco).
 Remover uma solução do portal não apaga o banco dela. Para apagar (irreversível):
 `sudo docker compose exec postgres psql -U postgres -c 'DROP DATABASE jornada_lideranca'`.
 
+## Uso e limites de memória/CPU
+
+Tela **Uso** (administradores): memória, CPU e disco da VM; gráficos de memória e CPU de cada
+sistema (1 hora a 7 dias, com a leitura de todos os sistemas ao passar o mouse ou com as setas do
+teclado); uma tabela com o uso de agora, o pico das últimas 24 horas e o disco de cada sistema
+(banco + arquivos + imagem); onde está o espaço em disco; e os reinícios e encerramentos por falta
+de memória. O botão **Liberar** apaga o cache de construção e as imagens sem nome do Docker
+(nunca volumes, bancos nem sistemas em uso).
+
+**Limites:** cada sistema roda com um limite de memória e de CPU. Passou do limite de memória, só
+ele é reiniciado (sem swap extra, para não deixar a VM lenta); passou do de CPU, ele só fica mais
+lento. Os outros sistemas não sentem. O limite vem, nesta ordem, de:
+
+1. **Uso → Limites** do sistema (vale na hora, sem reiniciar; mostra o pico de 24 h e sugere um valor);
+2. `[recursos]` do manifesto (quem fez o sistema sabe quanto ele precisa);
+3. o padrão do servidor: `PORTAL_LIMITE_MEMORIA` (padrão `1g`) e `PORTAL_LIMITE_CPUS` (padrão `1`).
+
+```toml
+[recursos]
+memoria = "1.5g"   # 512m, 1g, 1.5g... 0 = sem limite
+cpus = 2           # núcleos; 0.5 = meio núcleo
+```
+
+Sistemas que já estavam rodando antes desta versão ficam sem limite até serem reiniciados; a tela
+Uso avisa e, em **Limites → Salvar**, o limite passa a valer na hora. A coleta roda dentro do
+portal a cada 60 s (`PORTAL_USO_INTERVALO`) e guarda 7 dias (`PORTAL_USO_DIAS`) em `dados/uso.db`.
+
 ## Backup e restauração
 
 Tela **Backups** (administradores). Por padrão, todo dia às 02:30 o portal copia:

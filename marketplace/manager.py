@@ -156,6 +156,21 @@ class Armazenamento:
             self.gravar(sol.id, dados)
             return preenchidas
 
+    def recursos(self, sid: str) -> dict:
+        """Limites escolhidos na tela para a solucao: {'memoria_mb': int|None, 'cpus': float|None}.
+        None = segue o manifesto/padrao do servidor; 0 = sem limite."""
+        r = self.ler(sid).get("recursos") or {}
+        return {"memoria_mb": r.get("memoria_mb"), "cpus": r.get("cpus")}
+
+    def salvar_recursos(self, sid: str, memoria_mb: int | None, cpus: float | None) -> None:
+        with self._lock:
+            dados = self.ler(sid)
+            if memoria_mb is None and cpus is None:
+                dados.pop("recursos", None)
+            else:
+                dados["recursos"] = {"memoria_mb": memoria_mb, "cpus": cpus}
+            self.gravar(sid, dados)
+
     def restaurar_banco(self, sol: Solucao) -> bool:
         """Volta as configuracoes do banco para o PostgreSQL do servidor.
 
@@ -239,7 +254,11 @@ class Gerenciador:
                 return {"estado": "iniciando", "detalhe": "Iniciando"}
             return {"estado": "com_problema", "detalhe": "Health check falhando - veja os logs"}
         if estado.get("Restarting"):
+            if estado.get("OOMKilled"):
+                return {"estado": "com_problema", "detalhe": "Reiniciando por falta de memoria - aumente o limite em Uso"}
             return {"estado": "com_problema", "detalhe": "Reiniciando em loop - veja os logs"}
+        if estado.get("OOMKilled"):
+            return {"estado": "com_problema", "detalhe": "Parou por falta de memoria - aumente o limite em Uso"}
         codigo = estado.get("ExitCode")
         detalhe = "Parado" if codigo in (0, 137, 143) else f"Parou com erro (codigo {codigo})"
         return {"estado": "parado" if codigo in (0, 137, 143) else "com_problema", "detalhe": detalhe}
@@ -370,7 +389,9 @@ class Gerenciador:
         tarefa.etapa = "Iniciando container"
         # Recria o container para aplicar configuracoes novas; os volumes preservam os dados.
         docker_cli.remove(sol.container)
-        tarefa.registrar(f"$ docker run {sol.container} -> {self.url(sol)}")
+        lim = self.limites(sol)
+        tarefa.registrar(f"$ docker run {sol.container} -> {self.url(sol)}"
+                         f" (memoria: {_texto_mem(lim['memoria_mb'])}, CPU: {_texto_cpus(lim['cpus'])})")
         cid = docker_cli.run_container(
             name=sol.container,
             image=sol.imagem,
@@ -382,6 +403,9 @@ class Gerenciador:
             env=self.ambiente(sol),
             volumes=sol.volumes_docker(),
             labels={"log20.portal": "1", "log20.solucao": sol.id},
+            memoria_mb=lim["memoria_mb"],
+            cpus=lim["cpus"],
+            processos=lim["processos"],
         )
         tarefa.registrar(f"Container {cid[:12]} criado. Aguardando a aplicacao responder...")
         tarefa.etapa = "Aguardando a aplicacao responder"
@@ -402,12 +426,47 @@ class Gerenciador:
             time.sleep(2)
         tarefa.registrar("A aplicacao ainda nao respondeu; ela pode estar terminando de iniciar. Veja os logs.")
 
+    # ---------- limites de memoria e CPU ----------
+    def limites(self, sol: Solucao) -> dict:
+        """Limites efetivos e de onde vieram: tela > manifesto > padrao do servidor."""
+        escolha = self.armazenamento.recursos(sol.id)
+        resultado = {}
+        for chave, manifesto, padrao in (("memoria_mb", sol.recursos_memoria_mb, self.config.limite_memoria_mb),
+                                         ("cpus", sol.recursos_cpus, self.config.limite_cpus)):
+            if escolha.get(chave) is not None:
+                resultado[chave], origem = escolha[chave], "portal"
+            elif manifesto is not None:
+                resultado[chave], origem = manifesto, "manifesto"
+            else:
+                resultado[chave], origem = padrao, "padrao"
+            resultado[f"origem_{chave}"] = origem
+        resultado["processos"] = self.config.limite_processos
+        return resultado
+
+    def aplicar_limites(self, sol: Solucao) -> str:
+        """Aplica os limites atuais no container em execucao (sem reiniciar). Devolve um aviso."""
+        info = docker_cli.container_inspect(sol.container)
+        if not (info and info.get("State", {}).get("Running")):
+            return "Vale quando a solucao for iniciada."
+        lim = self.limites(sol)
+        atual_mem = (info.get("HostConfig") or {}).get("Memory") or 0
+        if not lim["memoria_mb"] and atual_mem:
+            return "Para tirar o limite de memoria, clique em Reiniciar na solucao."
+        try:
+            docker_cli.atualizar_limites(sol.container, lim["memoria_mb"], lim["cpus"])
+        except docker_cli.DockerError as exc:
+            return f"Nao deu para aplicar agora ({exc}); vale no proximo Reiniciar."
+        return "Aplicado agora, sem reiniciar."
+
     def _diagnostico(self, sol: Solucao, tarefa: Tarefa, estado: dict) -> None:
         """Copia para o log da operacao o motivo da falha e o fim do log da aplicacao."""
         tarefa.registrar("")
         tarefa.registrar("----- diagnostico -----")
         if not estado.get("Running"):
             tarefa.registrar(f"Codigo de saida: {estado.get('ExitCode')} {estado.get('Error') or ''}".strip())
+        if estado.get("OOMKilled"):
+            tarefa.registrar(f"A aplicacao passou do limite de memoria ({_texto_mem(self.limites(sol)['memoria_mb'])}) "
+                             "e foi encerrada. Aumente o limite na tela Uso.")
         for item in ((estado.get("Health") or {}).get("Log") or [])[-2:]:
             saida = (item.get("Output") or "").strip() or "(sem saida)"
             tarefa.registrar(f"Health check (codigo {item.get('ExitCode')}): {saida}")
@@ -428,3 +487,13 @@ class Gerenciador:
             },
             "aplicacao": app_logs,
         }
+
+
+def _texto_mem(mb: int) -> str:
+    if not mb:
+        return "sem limite"
+    return f"{mb / 1024:g} GB" if mb % 1024 == 0 else f"{mb} MB"
+
+
+def _texto_cpus(cpus: float) -> str:
+    return f"{cpus:g}" if cpus else "sem limite"

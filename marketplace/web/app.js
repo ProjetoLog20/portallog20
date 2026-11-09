@@ -3,7 +3,7 @@
 /* =========================================================================
    Portal de Soluções LOG20 — interface (sem frameworks)
    Rotas: #/  #/login  #/senha  #/admin/solucoes  #/admin/solucao/<id>
-          #/admin/usuarios  #/admin/acessos  #/admin/backups
+          #/admin/usuarios  #/admin/acessos  #/admin/backups  #/admin/uso
    ========================================================================= */
 
 const ROTULOS = {
@@ -233,7 +233,8 @@ function montarTopo() {
         item("#/admin/solucoes", "Soluções", rota.startsWith("#/admin/solucao") || rota === "#/admin/nova-solucao" || rota.startsWith("#/admin/editar-solucao/")),
         item("#/admin/usuarios", "Usuários", rota === "#/admin/usuarios"),
         item("#/admin/acessos", "Acessos", rota === "#/admin/acessos"),
-        item("#/admin/backups", "Backups", rota === "#/admin/backups"));
+        item("#/admin/backups", "Backups", rota === "#/admin/backups"),
+        item("#/admin/uso", "Uso", rota === "#/admin/uso"));
     }
   }
   const sair = async () => { await api("/api/auth/logout", { method: "POST" }).catch(() => {}); eu = null; location.hash = "#/login"; };
@@ -2136,6 +2137,373 @@ function pintarAjustesBackup() {
   alvo.replaceChildren(form);
 }
 
+/* ================= admin: uso de recursos ================= */
+
+const estadoUso = { horas: 24, dados: null, ocultas: new Set() };
+const PERIODOS_USO = [[1, "1 hora"], [6, "6 horas"], [24, "24 horas"], [168, "7 dias"]];
+
+function bytesTexto(n) {
+  if (n == null) return "—";
+  const gb = n / 1024 ** 3;
+  if (gb >= 1) return `${gb.toLocaleString("pt-BR", { maximumFractionDigits: gb >= 10 ? 0 : 1 })} GB`;
+  return `${Math.round(n / 1024 ** 2).toLocaleString("pt-BR")} MB`;
+}
+function mbTexto(mb) { return mb ? bytesTexto(mb * 1024 ** 2) : "sem limite"; }
+function nucleos(n) {
+  if (!n) return "sem limite";
+  return `${n.toLocaleString("pt-BR", { maximumFractionDigits: 2 })} ${n === 1 ? "núcleo" : "núcleos"}`;
+}
+function porcento(x) { return `${Math.round(x * 100)}%`; }
+
+/** SVG com a mesma assinatura do h(). */
+function svg(tag, attrs = {}, ...filhos) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null && v !== false) el.setAttribute(k, v);
+  for (const f of filhos.flat()) if (f != null) el.append(f);
+  return el;
+}
+
+/** Medidor: a cor diz a gravidade (normal, atenção, crítico); o texto ao lado repete o número. */
+function medidor(fracao, { atencao = 0.8, critico = 0.95 } = {}) {
+  const f = Math.max(0, Math.min(1, fracao || 0));
+  const nivel = f >= critico ? "critico" : f >= atencao ? "atencao" : "normal";
+  return h("span", { class: `medidor ${nivel}`, role: "meter", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(f * 100)) },
+    h("span", { style: `width:${(f * 100).toFixed(1)}%` }));
+}
+
+/** Escala "bonita" para o eixo: 0 até um valor redondo acima do máximo. */
+function escala(max, passos = 4) {
+  if (!(max > 0)) return { max: 1, ticks: [0, 0.25, 0.5, 0.75, 1] };
+  const bruto = max / passos;
+  const mag = 10 ** Math.floor(Math.log10(bruto));
+  const passo = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((p) => p >= bruto);
+  const topo = passo * Math.ceil(max / passo);
+  const ticks = [];
+  for (let v = 0; v <= topo + passo / 2; v += passo) ticks.push(v);
+  return { max: topo, ticks };
+}
+
+/**
+ * Gráfico de linhas com legenda, linha-guia e leitura de todas as séries no ponto (mouse,
+ * toque ou setas do teclado). series: [{id, nome, cor (índice 1-8 ou 'outros'), valores}]
+ */
+function graficoLinhas({ titulo, subtitulo, tempos, series, formatar, formatarEixo, horas }) {
+  const caixa = h("figure", { class: "grafico" });
+  const legenda = h("ul", { class: "legenda" }, series.map((s) =>
+    h("li", {}, h("span", { class: `chave serie-${s.cor}` }), s.nome)));
+  const area = h("div", { class: "grafico-area", tabindex: "0", role: "img",
+    "aria-label": `${titulo}. Use as setas para ler os valores. Os números de cada sistema também estão na tabela abaixo.` });
+  const dica = h("div", { class: "dica-grafico", hidden: true });
+  caixa.append(h("figcaption", {}, h("strong", {}, titulo), subtitulo ? h("span", {}, subtitulo) : null), legenda, area, dica);
+
+  let indice = null;
+  const desenhar = () => {
+    const largura = Math.max(280, area.clientWidth || 600);
+    const altura = 220;
+    const m = { e: 56, d: 14, t: 10, b: 26 };
+    const w = largura - m.e - m.d, alt = altura - m.t - m.b;
+    const n = tempos.length;
+    const maximo = Math.max(0, ...series.flatMap((s) => s.valores.filter((v) => v != null)));
+    const esc = escala(maximo);
+    const x = (i) => m.e + (n <= 1 ? w / 2 : (i * w) / (n - 1));
+    const y = (v) => m.t + alt - (v / esc.max) * alt;
+    const raiz = svg("svg", { width: largura, height: altura, viewBox: `0 0 ${largura} ${altura}`, "aria-hidden": "true" });
+    for (const tk of esc.ticks) {
+      raiz.append(svg("line", { class: tk === 0 ? "base" : "grade", x1: m.e, x2: largura - m.d, y1: y(tk), y2: y(tk) }));
+      raiz.append(svg("text", { class: "eixo", x: m.e - 8, y: y(tk) + 4, "text-anchor": "end" }, formatarEixo(tk, esc.max)));
+    }
+    const nRotulos = Math.min(n, largura < 520 ? 3 : 6);
+    for (let k = 0; k < nRotulos; k++) {
+      const i = nRotulos === 1 ? 0 : Math.round((k * (n - 1)) / (nRotulos - 1));
+      const d = new Date(tempos[i] * 1000);
+      const rot = horas > 24 ? d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " " + d.toLocaleTimeString("pt-BR", { hour: "2-digit" }) + "h"
+        : d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      raiz.append(svg("text", { class: "eixo", x: x(i), y: altura - 6, "text-anchor": k === 0 ? "start" : k === nRotulos - 1 ? "end" : "middle" }, rot));
+    }
+    for (const s of series) {
+      let d = "", aberto = false;
+      s.valores.forEach((v, i) => {
+        if (v == null) { aberto = false; return; }
+        d += `${aberto ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+        aberto = true;
+      });
+      raiz.append(svg("path", { class: `linha serie-${s.cor}`, d }));
+    }
+    const guia = svg("line", { class: "guia", y1: m.t, y2: m.t + alt, visibility: "hidden" });
+    const pontos = svg("g", {});
+    raiz.append(guia, pontos);
+    area.replaceChildren(raiz);
+
+    const mostrar = (i) => {
+      indice = i;
+      if (i == null) { guia.setAttribute("visibility", "hidden"); pontos.replaceChildren(); dica.hidden = true; return; }
+      guia.setAttribute("x1", x(i)); guia.setAttribute("x2", x(i)); guia.setAttribute("visibility", "visible");
+      pontos.replaceChildren(...series.filter((s) => s.valores[i] != null).map((s) =>
+        svg("circle", { class: `ponto serie-${s.cor}`, cx: x(i), cy: y(s.valores[i]), r: 4 })));
+      const linhas = series.filter((s) => s.valores[i] != null).sort((a, b) => b.valores[i] - a.valores[i]);
+      const d = new Date(tempos[i] * 1000);
+      dica.replaceChildren(
+        h("div", { class: "dica-quando" }, d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })),
+        ...linhas.map((s) => h("div", { class: "dica-linha" }, h("span", { class: `chave serie-${s.cor}` }), h("strong", {}, formatar(s.valores[i])), h("span", {}, s.nome))));
+      dica.hidden = false;
+      const px = x(i) + 14;
+      const larguraDica = dica.offsetWidth || 180;
+      dica.style.left = `${area.offsetLeft + (px + larguraDica > largura ? Math.max(0, x(i) - larguraDica - 14) : px)}px`;
+      dica.style.top = `${area.offsetTop + 8}px`;
+    };
+    const indicePara = (clientX) => {
+      const r = raiz.getBoundingClientRect();
+      const rel = (clientX - r.left - m.e) / w;
+      return Math.max(0, Math.min(n - 1, Math.round(rel * (n - 1))));
+    };
+    area.onpointermove = (ev) => mostrar(indicePara(ev.clientX));
+    area.onpointerleave = () => mostrar(null);
+    area.onblur = () => mostrar(null);
+    area.onkeydown = (ev) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(ev.key)) return;
+      ev.preventDefault();
+      const atual = indice ?? n - 1;
+      mostrar(ev.key === "Home" ? 0 : ev.key === "End" ? n - 1 : Math.max(0, Math.min(n - 1, atual + (ev.key === "ArrowLeft" ? -1 : 1))));
+    };
+    area.onfocus = () => mostrar(n - 1);
+    if (indice != null) mostrar(Math.min(indice, n - 1));
+  };
+  if (!tempos.length) {
+    area.replaceChildren(h("p", { class: "nota grafico-vazio" }, "Ainda sem dados: a coleta começou agora. Os primeiros pontos aparecem em alguns minutos."));
+  } else {
+    requestAnimationFrame(desenhar);
+    new ResizeObserver(() => desenhar()).observe(area);
+  }
+  return caixa;
+}
+
+async function telaUso() {
+  document.title = "Uso · Portal de Soluções LOG20";
+  estadoUso.dados = await api(`/api/uso?horas=${estadoUso.horas}`);
+  $conteudo.replaceChildren(
+    h("section", { class: "intro intro-linha" },
+      h("div", {}, h("h1", {}, "Uso"),
+        h("p", {}, "Memória, CPU e disco do servidor e de cada sistema. Cada sistema tem um limite: se passar do limite de memória, só ele é reiniciado, sem derrubar os outros.")),
+      h("div", { class: "intro-lado" },
+        h("div", { class: "periodo", role: "group", "aria-label": "Período dos gráficos" }, PERIODOS_USO.map(([hs, rotulo]) =>
+          h("button", { type: "button", class: "botao pequeno", "aria-pressed": String(estadoUso.horas === hs),
+            onclick: async () => { estadoUso.horas = hs; await telaUso(); } }, rotulo))))),
+    h("div", { id: "uso-alertas" }),
+    h("div", { class: "grade-backup", id: "uso-cartoes" }),
+    h("div", { class: "graficos-uso", id: "uso-graficos" }),
+    h("section", { class: "painel" }, h("h2", {}, "Por sistema"),
+      h("p", { class: "nota sem-topo" }, "Valores de agora, o pico das últimas 24 horas e o espaço em disco de cada sistema. Os gráficos acima mostram a mesma informação ao longo do tempo."),
+      h("div", { id: "uso-tabela" })),
+    h("div", { class: "uso-rodape" },
+      h("section", { class: "painel" }, h("h2", {}, "Onde está o espaço em disco"), h("div", { id: "uso-disco" })),
+      h("section", { class: "painel" }, h("h2", {}, "Reinícios e falta de memória"), h("div", { id: "uso-eventos" }))));
+  pintarUso(true);
+}
+
+async function atualizarUso() {
+  if (document.querySelector("dialog[open]")) return;
+  estadoUso.dados = await api(`/api/uso?horas=${estadoUso.horas}`);
+  pintarUso(true);
+}
+
+function pintarUso(graficos) {
+  const d = estadoUso.dados;
+  const maq = d.maquina;
+  const solucoes = d.alvos.filter((a) => a.tipo === "solucao");
+  const fracMem = maq.mem_total ? maq.mem_usada / maq.mem_total : 0;
+  const fracCpu = Math.min(1, (maq.carga[0] || 0) / (maq.cpus || 1));
+  const fracDisco = maq.disco_total ? maq.disco_usado / maq.disco_total : 0;
+  const docker = d.tamanhos.docker || {};
+  const recuperavel = (docker["Build Cache"]?.recuperavel || 0) + (docker.Images?.recuperavel || 0);
+
+  // Alertas: o que precisa de atenção agora.
+  const alertas = [];
+  if (fracDisco >= 0.85) alertas.push(`Disco da VM ${porcento(fracDisco)} cheio (${bytesTexto(maq.disco_livre)} livres).${recuperavel > 1024 ** 3 ? " Dá para liberar espaço no botão abaixo." : ""}`);
+  if (fracMem >= 0.9) alertas.push(`Memória da VM ${porcento(fracMem)} usada. Considere limites menores ou mais memória para a VM.`);
+  for (const a of solucoes) {
+    const lim = a.limites.memoria_mb * 1024 ** 2;
+    if (a.mem && lim && a.mem / lim >= 0.9) alertas.push(`${a.nome} está usando ${porcento(a.mem / lim)} do limite de memória (${mbTexto(a.limites.memoria_mb)}). Perto do limite, ele é reiniciado.`);
+  }
+  const oom = d.historico.eventos.filter((e) => e.tipo === "falta_memoria" && Date.now() / 1000 - e.ts < 86400);
+  for (const e of oom) alertas.push(`${solucoes.find((s) => s.id === e.alvo)?.nome || e.alvo} foi reiniciado por falta de memória (${quando(e.ts).toLowerCase()}). Aumente o limite dele.`);
+  if (d.coleta.erro) alertas.push(`A coleta teve um problema: ${d.coleta.erro}`);
+  document.getElementById("uso-alertas").replaceChildren(alertas.length
+    ? h("div", { class: "aviso" }, h("strong", {}, "Atenção"), h("ul", {}, alertas.map((a) => h("li", {}, a)))) : null);
+
+  // Cartões da VM.
+  const cartao = (rotulo, valor, detalhe, extra) => h("div", { class: "cartao-backup" },
+    h("span", { class: "deteccao-rotulo" }, rotulo), h("strong", {}, valor), extra || null, detalhe ? h("small", {}, detalhe) : null);
+  document.getElementById("uso-cartoes").replaceChildren(
+    cartao("Memória da VM", `${bytesTexto(maq.mem_usada)} de ${bytesTexto(maq.mem_total)}`, `${porcento(fracMem)} em uso${maq.swap_usada > 64 * 1024 ** 2 ? ` · ${bytesTexto(maq.swap_usada)} em swap` : ""}`, medidor(fracMem, { atencao: 0.8, critico: 0.92 })),
+    cartao("CPU da VM", porcento(fracCpu), `Carga média de 1 min: ${maq.carga[0].toLocaleString("pt-BR")} em ${nucleos(maq.cpus)}`, medidor(fracCpu, { atencao: 0.7, critico: 0.9 })),
+    cartao("Disco da VM", `${bytesTexto(maq.disco_livre)} livres`, `${bytesTexto(maq.disco_usado)} de ${bytesTexto(maq.disco_total)} em uso`, medidor(fracDisco, { atencao: 0.8, critico: 0.92 })),
+    cartao("Espaço que dá para liberar", bytesTexto(recuperavel), "Cache de construção e imagens antigas do Docker. Dados e bancos não são tocados.",
+      h("button", { type: "button", class: "botao pequeno", disabled: recuperavel < 50 * 1024 ** 2, onclick: liberarEspaco }, "Liberar")));
+
+  if (graficos) pintarGraficosUso();
+  pintarTabelaUso();
+  pintarDiscoUso();
+  pintarEventosUso();
+}
+
+async function liberarEspaco(ev) {
+  const botao = ev.currentTarget;
+  if (!(await confirmar({ titulo: "Liberar espaço do Docker?", texto: "Apaga o cache de construção e as imagens sem nome (restos de versões antigas). Bancos, arquivos e sistemas em uso não mudam. A próxima atualização de um sistema pode demorar um pouco mais.", botao: "Liberar espaço" }))) return;
+  botao.disabled = true;
+  botao.replaceChildren(h("span", { class: "giro", "aria-hidden": "true" }), "Liberando…");
+  try {
+    const r = await api("/api/uso/limpar-docker", { method: "POST" });
+    toast(`${r.liberado_texto} liberados.`);
+    await atualizarUso();
+  } catch (e) { toast(e.message, "erro"); botao.disabled = false; botao.textContent = "Liberar"; }
+}
+
+function pintarGraficosUso() {
+  const d = estadoUso.dados;
+  const hist = d.historico;
+  // Cor segue o sistema (ordem fixa: soluções por nome, depois a infraestrutura), nunca o ranking.
+  const alvos = d.alvos.filter((a) => hist.series[a.id]);
+  const tempos = [...new Set(Object.values(hist.series).flatMap((s) => s.t))].sort((a, b) => a - b);
+  const pos = new Map(tempos.map((t, i) => [t, i]));
+  const montar = (campo, transformar) => {
+    const lista = alvos.slice(0, alvos.length > 8 ? 7 : 8).map((a, i) => {
+      const valores = Array(tempos.length).fill(null);
+      hist.series[a.id].t.forEach((t, k) => { valores[pos.get(t)] = transformar(hist.series[a.id][campo][k]); });
+      return { id: a.id, nome: a.nome, cor: i + 1, valores };
+    });
+    if (alvos.length > 8) {
+      const valores = Array(tempos.length).fill(null);
+      for (const a of alvos.slice(7)) hist.series[a.id].t.forEach((t, k) => {
+        const i = pos.get(t); valores[i] = (valores[i] || 0) + transformar(hist.series[a.id][campo][k]);
+      });
+      lista.push({ id: "outros", nome: `Outros (${alvos.length - 7})`, cor: "outros", valores });
+    }
+    return lista;
+  };
+  const rotulo = PERIODOS_USO.find(([hs]) => hs === estadoUso.horas)[1];
+  const mb = (v) => v / 1024 ** 2;
+  const cpus = d.maquina.cpus || 1;
+  document.getElementById("uso-graficos").replaceChildren(
+    graficoLinhas({
+      titulo: "Memória por sistema", subtitulo: `Últimas ${rotulo}, o maior valor de cada intervalo`, horas: estadoUso.horas,
+      tempos, series: montar("mem", mb),
+      formatar: (v) => bytesTexto(v * 1024 ** 2),
+      formatarEixo: (v, max) => (max >= 1000 ? `${(v / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} GB` : `${Math.round(v)} MB`),
+    }),
+    graficoLinhas({
+      titulo: "CPU por sistema", subtitulo: `Últimas ${rotulo}, % da CPU da VM (${nucleos(cpus)}), média de cada intervalo`, horas: estadoUso.horas,
+      tempos, series: montar("cpu", (v) => (v / cpus) * 100),
+      formatar: (v) => `${v.toLocaleString("pt-BR", { maximumFractionDigits: v < 10 ? 1 : 0 })}%`,
+      formatarEixo: (v) => `${Math.round(v)}%`,
+    }));
+}
+
+function pintarTabelaUso() {
+  const d = estadoUso.dados;
+  const linhas = d.alvos.map((a) => {
+    const sol = a.tipo === "solucao";
+    const limMem = sol ? a.limites.memoria_mb : 0;
+    const fracMem = a.mem != null && limMem ? a.mem / (limMem * 1024 ** 2) : null;
+    const disco = sol ? a.disco.volumes + a.disco.banco + a.disco.imagem : null;
+    return h("tr", { class: sol ? "" : "linha-infra" },
+      h("th", { scope: "row" }, h("span", { class: "nome-sistema" }, a.nome),
+        sol ? h("div", { class: "sub" }, pilula(a.status.estado, a.status.detalhe)) : h("div", { class: "sub" }, "Infraestrutura do portal")),
+      h("td", {}, a.mem != null ? h("div", { class: "valor-uso" },
+          h("strong", {}, bytesTexto(a.mem)), sol ? h("span", {}, ` de ${mbTexto(limMem)}`) : null) : h("span", { class: "sub" }, "Parado"),
+        fracMem != null ? medidor(fracMem, { atencao: 0.8, critico: 0.9 }) : null,
+        // Container criado antes dos limites (ou com outro valor): o limite configurado ainda não vale.
+        sol && a.rodando && limMem && a.mem_limite_docker && Math.abs(a.mem_limite_docker - limMem * 1024 ** 2) > 8 * 1024 ** 2
+          ? h("div", { class: "sub alerta-limite" }, "Limite ainda não aplicado: clique em Limites e Salvar (vale na hora)") : null),
+      h("td", { class: "num" }, a.pico_mem_24h ? bytesTexto(a.pico_mem_24h) : "—"),
+      h("td", {}, a.cpu != null ? h("div", { class: "valor-uso" },
+          h("strong", {}, a.cpu.toLocaleString("pt-BR", { maximumFractionDigits: 2 })), h("span", {}, sol ? ` de ${nucleos(a.limites.cpus)}` : " núcleo")) : "—"),
+      h("td", { class: "num" }, sol ? h("span", { title: `Banco ${bytesTexto(a.disco.banco)} · arquivos ${bytesTexto(a.disco.volumes)} · imagem ${bytesTexto(a.disco.imagem)}` }, bytesTexto(disco)) : "—"),
+      h("td", { class: "acoes-backup" }, sol ? h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoLimites(a) }, "Limites") : null));
+  });
+  document.getElementById("uso-tabela").replaceChildren(h("div", { class: "tabela-rolagem" },
+    h("table", { class: "tabela-simples tabela-uso" },
+      h("thead", {}, h("tr", {}, ["Sistema", "Memória agora", "Pico 24 h", "CPU agora", "Disco", ""].map((x, i) => h("th", { class: i === 2 || i === 4 ? "num" : "" }, x)))),
+      h("tbody", {}, linhas))));
+}
+
+function pintarDiscoUso() {
+  const d = estadoUso.dados;
+  const t = d.tamanhos;
+  const docker = t.docker || {};
+  const soma = (o) => Object.values(o || {}).reduce((s, v) => s + v, 0);
+  const volumesSol = Object.entries(t.volumes || {}).filter(([k]) => k !== "log20-postgres-dados").reduce((s, [, v]) => s + v, 0);
+  const itens = [
+    ["Imagens dos sistemas (Docker)", docker.Images?.total ?? soma(t.imagens)],
+    ["Cache de construção (Docker)", docker["Build Cache"]?.total || 0],
+    ["Bancos do PostgreSQL do servidor", (t.volumes || {})["log20-postgres-dados"] ?? soma(t.bancos)],
+    ["Arquivos dos sistemas (volumes)", volumesSol],
+    ["Backups", t.backups || 0],
+  ].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const maior = Math.max(1, ...itens.map(([, v]) => v));
+  document.getElementById("uso-disco").replaceChildren(
+    itens.length ? h("ul", { class: "barras-disco" }, itens.map(([rotulo, v]) => h("li", {},
+      h("span", { class: "rotulo" }, rotulo),
+      h("span", { class: "trilho" }, h("span", { class: "barra", style: `width:${Math.max(1.5, (v / maior) * 100).toFixed(1)}%` })),
+      h("span", { class: "valor" }, bytesTexto(v))))) : h("p", { class: "nota" }, "Medindo… (a medição dos tamanhos roda a cada 15 minutos)."),
+    h("p", { class: "nota" }, `Disco da VM: ${bytesTexto(d.maquina.disco_usado)} usados, ${bytesTexto(d.maquina.disco_livre)} livres.${t.medido_em ? ` Medido ${quando(t.medido_em).toLowerCase()}.` : ""}`),
+    (t.erros || []).length ? h("p", { class: "texto-erro" }, t.erros.join(" · ")) : null);
+}
+
+function pintarEventosUso() {
+  const d = estadoUso.dados;
+  const nomes = new Map(d.alvos.map((a) => [a.id, a.nome]));
+  const eventos = d.historico.eventos;
+  document.getElementById("uso-eventos").replaceChildren(eventos.length
+    ? h("ul", { class: "lista-eventos" }, eventos.slice(0, 12).map((e) => h("li", {},
+        pilula(e.tipo === "falta_memoria" ? "com_problema" : "ocupado", e.tipo === "falta_memoria" ? "Falta de memória" : "Reinício"),
+        h("span", {}, h("strong", {}, nomes.get(e.alvo) || e.alvo), ` · ${e.detalhe}`),
+        h("small", {}, quando(e.ts)))))
+    : h("p", { class: "texto-ok" }, `Nenhum reinício nos últimos ${d.coleta.dias} dias.`));
+}
+
+function dialogoLimites(a) {
+  const d = estadoUso.dados;
+  const lim = a.limites;
+  const origem = { portal: "definido aqui", manifesto: "sugerido por quem fez o sistema (manifesto)", padrao: "padrão do servidor" };
+  const mem = h("input", { type: "text", id: "lim-mem", autocomplete: "off", spellcheck: false,
+    value: lim.origem_memoria_mb === "portal" ? (lim.memoria_mb ? `${lim.memoria_mb}m` : "0") : "", placeholder: lim.memoria_mb ? `${lim.memoria_mb}m` : "sem limite" });
+  const cpu = h("input", { type: "text", id: "lim-cpu", inputmode: "decimal", autocomplete: "off",
+    value: lim.origem_cpus === "portal" ? String(lim.cpus).replace(".", ",") : "", placeholder: lim.cpus ? String(lim.cpus).replace(".", ",") : "sem limite" });
+  const botao = h("button", { type: "submit", class: "botao primario", form: "form-limites" }, "Salvar");
+  const form = h("form", { id: "form-limites", class: "config" },
+    h("div", { class: "resumo-limites" },
+      h("div", {}, h("span", { class: "deteccao-rotulo" }, "Memória agora"), h("strong", {}, a.mem != null ? bytesTexto(a.mem) : "parado")),
+      h("div", {}, h("span", { class: "deteccao-rotulo" }, "Pico em 24 h"), h("strong", {}, a.pico_mem_24h ? bytesTexto(a.pico_mem_24h) : "—")),
+      h("div", {}, h("span", { class: "deteccao-rotulo" }, "CPU agora"), h("strong", {}, a.cpu != null ? nucleos(a.cpu) : "—"))),
+    h("div", { class: "form-grade" },
+      h("div", { class: "campo" }, h("label", { for: "lim-mem" }, "Memória"), mem,
+        h("small", {}, `Ex.: 512m, 1g, 1,5g. 0 = sem limite. Em branco = ${lim.origem_memoria_mb === "portal" ? "padrão" : origem[lim.origem_memoria_mb]} (${mbTexto(lim.origem_memoria_mb === "portal" ? (a.manifesto.memoria_mb ?? d.padroes.memoria_mb) : lim.memoria_mb)}).`),
+        a.sugestao_mb ? h("button", { type: "button", class: "link-limpar", onclick: () => { mem.value = `${a.sugestao_mb}m`; mem.focus(); } },
+          `Usar ${mbTexto(a.sugestao_mb)} (pico de 24 h + 50%)`) : null),
+      h("div", { class: "campo" }, h("label", { for: "lim-cpu" }, "CPU (núcleos)"), cpu,
+        h("small", {}, `Ex.: 0,5, 1, 2. A VM tem ${nucleos(d.maquina.cpus)}. 0 = sem limite. Em branco = ${lim.origem_cpus === "portal" ? "padrão" : origem[lim.origem_cpus]} (${nucleos(lim.origem_cpus === "portal" ? (a.manifesto.cpus ?? d.padroes.cpus) : lim.cpus)}).`))),
+    h("ul", { class: "lista-explica" },
+      h("li", {}, `Agora: memória ${mbTexto(lim.memoria_mb)} (${origem[lim.origem_memoria_mb]}), CPU ${nucleos(lim.cpus)} (${origem[lim.origem_cpus]}).`),
+      h("li", {}, "Passou do limite de memória: o sistema é reiniciado sozinho (aparece em Reinícios). Passou do de CPU: ele só fica mais lento."),
+      h("li", {}, "Vale na hora, sem reiniciar, quando o sistema está no ar.")));
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    botao.disabled = true;
+    try {
+      const r = await api(`/api/solucoes/${a.id}/recursos`, { method: "PUT", body: {
+        memoria: mem.value.trim() || null, cpus: cpu.value.trim().replace(",", ".") || null } });
+      dlg.close();
+      toast(`Limites de ${a.nome}: memória ${mbTexto(r.limites.memoria_mb)}, CPU ${nucleos(r.limites.cpus)}. ${r.aviso}`);
+      await atualizarUso();
+    } catch (e) { toast(e.message, "erro"); botao.disabled = false; }
+  });
+  const dlg = dialogo({
+    titulo: `Limites de ${a.nome}`,
+    corpo: form,
+    rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), botao],
+  });
+}
+
 /* ================= navegação ================= */
 
 async function atualizar() {
@@ -2150,6 +2518,8 @@ async function atualizar() {
       await telaMeusSistemas();
     } else if (rota === "#/admin/backups") {
       await atualizarBackups();
+    } else if (rota === "#/admin/uso") {
+      await atualizarUso();
     }
   } catch { /* tenta de novo no próximo ciclo */ }
 }
@@ -2229,6 +2599,7 @@ async function navegar() {
     else if (rota === "#/admin/nova-solucao") telaNovaSolucao();
     else if (rota.startsWith("#/admin/editar-solucao/")) await telaEditarSolucao(rota.split("/")[3]);
     else if (rota === "#/admin/backups") { await telaBackups(); novoRitmo = [2000, 30000]; }
+    else if (rota === "#/admin/uso") { await telaUso(); novoRitmo = [60000, 60000]; }
     else { rota = "#/"; await telaMeusSistemas(); novoRitmo = [60000, 60000]; }
   } catch (e) {
     if (e.status === 401 || location.hash.split("?")[0] !== rota) return;

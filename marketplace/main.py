@@ -15,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from . import config as config_mod
 from . import assistente, docker_cli, proxy
 from .backup import Backups, ErroBackup, formatar_tamanho, resumo
+from .catalog import cpus_validas, memoria_mb
+from .uso import INFRA, Uso
 from .auth import Autenticacao, ErroAuth, ErroLote, Usuario
 from .catalog import Solucao, carregar_catalogo
 from .manager import ACOES, Armazenamento, Gerenciador
@@ -73,9 +75,14 @@ def ger() -> Gerenciador:
 BACKUPS = Backups(CFG, ger)
 
 
+# Uso de memoria, CPU e disco (tela Uso): coletor em segundo plano.
+USO = Uso(CFG, ger, lambda: BACKUPS.pasta)
+
+
 @app.on_event("startup")
 def _iniciar_agendador() -> None:
     BACKUPS.iniciar_agendador()
+    USO.iniciar()
 
 
 # ---------------- protecoes gerais ----------------
@@ -904,3 +911,85 @@ def api_importacao_apagar(iid: str, _: Usuario = Depends(exigir_admin)) -> dict:
     except ErroBackup as exc:
         raise HTTPException(404, str(exc)) from exc
     return {"ok": True}
+
+
+# ---------------- uso de recursos e limites ----------------
+
+def _mb_para_bytes(mb: int) -> int:
+    return int(mb) * 1024 * 1024
+
+
+@app.get("/api/uso")
+def api_uso(horas: float = 24, _: Usuario = Depends(exigir_admin)) -> dict:
+    import math
+
+    from . import banco as banco_pg
+
+    horas = min(max(horas, 0.25), CFG.uso_dias * 24)
+    atual = USO.atual()
+    tam = USO.tamanhos()
+    hist = USO.historico(horas)
+    picos = hist.pop("picos_24h")
+    alvos = []
+    for sol in sorted(ger().solucoes.values(), key=lambda s: s.nome.lower()):
+        c = atual["conteineres"].get(sol.id) or {}
+        lim = ger().limites(sol)
+        guardado = ger().armazenamento.banco(sol.id) or {}
+        nome_banco = guardado.get("nome") or (banco_pg.nomes(sol.id)[0] if sol.banco else "")
+        imagem = sol.imagem if ":" in sol.imagem.rsplit("/", 1)[-1] else f"{sol.imagem}:latest"
+        pico = picos.get(sol.id) or {}
+        sugestao = None
+        if pico.get("mem"):
+            sugestao = max(256, math.ceil(pico["mem"] * 1.5 / (128 * 1024 * 1024)) * 128)
+        alvos.append({
+            "id": sol.id, "nome": sol.nome, "tipo": "solucao", "status": ger().status(sol),
+            "rodando": sol.id in atual["conteineres"],
+            "cpu": c.get("cpu"), "mem": c.get("mem"), "mem_limite_docker": c.get("mem_limite"),
+            "processos": c.get("processos"), "limites": lim,
+            "manifesto": {"memoria_mb": sol.recursos_memoria_mb, "cpus": sol.recursos_cpus},
+            "pico_mem_24h": pico.get("mem"), "pico_cpu_24h": pico.get("cpu"), "sugestao_mb": sugestao,
+            "disco": {"volumes": sum(tam["volumes"].get(sol.nome_volume(k), 0) for k in sol.volumes),
+                      "banco": tam["bancos"].get(nome_banco, 0) if nome_banco else 0,
+                      "imagem": tam["imagens"].get(imagem, 0)},
+        })
+    for nome, rotulo in INFRA.items():
+        c = atual["conteineres"].get(nome) or {}
+        pico = picos.get(nome) or {}
+        alvos.append({"id": nome, "nome": rotulo, "tipo": "infra", "rodando": nome in atual["conteineres"],
+                      "cpu": c.get("cpu"), "mem": c.get("mem"), "mem_limite_docker": c.get("mem_limite"),
+                      "pico_mem_24h": pico.get("mem"), "pico_cpu_24h": pico.get("cpu")})
+    return {
+        "ts": atual["ts"], "maquina": atual["maquina"], "alvos": alvos, "historico": hist, "tamanhos": tam,
+        "padroes": {"memoria_mb": CFG.limite_memoria_mb, "cpus": CFG.limite_cpus, "processos": CFG.limite_processos},
+        "coleta": {"intervalo_s": CFG.uso_intervalo_s, "dias": CFG.uso_dias, "erro": USO.erro},
+    }
+
+
+@app.put("/api/solucoes/{sid}/recursos")
+def api_recursos(sid: str, memoria: str | int | None = Body(None, embed=True), cpus: str | float | None = Body(None, embed=True),
+                 autor: Usuario = Depends(exigir_admin)) -> dict:
+    """memoria: '768m', '1.5g', 0 (sem limite) ou null (volta ao padrao); cpus: 0.5, 2, 0 ou null."""
+    sol = _solucao(sid)
+    try:
+        mem = None if memoria in (None, "") else memoria_mb(memoria)
+        cp = None if cpus in (None, "") else cpus_validas(cpus)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    maquina_mb = (USO.atual()["maquina"].get("mem_total") or 0) // (1024 * 1024)
+    if mem and maquina_mb and mem > maquina_mb:
+        raise HTTPException(400, f"A VM tem {maquina_mb} MB de memoria; o limite nao pode passar disso.")
+    nucleos = os.cpu_count() or 1
+    if cp and cp > nucleos:
+        raise HTTPException(400, f"A VM tem {nucleos} nucleo(s) de CPU; o limite nao pode passar disso.")
+    ger().armazenamento.salvar_recursos(sid, mem, cp)
+    aviso = ger().aplicar_limites(sol)
+    lim = ger().limites(sol)
+    AUTH.registrar(autor, "Mudou limites", f"{sid}: memoria {lim['memoria_mb'] or 'sem limite'} MB, CPU {lim['cpus'] or 'sem limite'}")
+    return {"ok": True, "aviso": aviso, "limites": lim}
+
+
+@app.post("/api/uso/limpar-docker")
+def api_limpar_docker(autor: Usuario = Depends(exigir_admin)) -> dict:
+    r = USO.limpar_docker()
+    AUTH.registrar(autor, "Limpou o cache do Docker", f"{formatar_tamanho(r['liberado'])} liberados")
+    return {**r, "liberado_texto": formatar_tamanho(r["liberado"])}

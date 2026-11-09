@@ -159,6 +159,14 @@ ajuda = "Explique em uma frase o que muda quando esta opção está ligada."
 
 
 # ----------------------------------------------------------------------------
+# Recursos (opcional). Sem esta parte vale o padrao do servidor (1 GB, 1 nucleo).
+# Passou do limite de memoria: a solucao e reiniciada; o administrador muda em Uso > Limites.
+# ----------------------------------------------------------------------------
+# [recursos]
+# memoria = "512m"   # 512m, 1g, 1.5g...
+# cpus = 0.5         # nucleos
+
+# ----------------------------------------------------------------------------
 # Backup (opcional). O portal ja copia todo dia o banco do servidor e os volumes da solucao.
 # ----------------------------------------------------------------------------
 # [backup]

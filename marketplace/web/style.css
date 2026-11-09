@@ -40,6 +40,13 @@
   --raio-p: 6px;
   --pista: repeating-linear-gradient(90deg, var(--cobre) 0 8px, transparent 8px 12px);
   color-scheme: light;
+  /* Gráficos: 8 cores por sistema, nesta ordem (validada para daltonismo); status à parte. */
+  --serie-1: #2a78d6; --serie-2: #eb6834; --serie-3: #1baf7a; --serie-4: #eda100;
+  --serie-5: #e87ba4; --serie-6: #008300; --serie-7: #6250d6; --serie-8: #e34948;
+  --serie-outros: #8a979c;
+  --medidor-normal: #2a78d6; --medidor-normal-trilho: #cde2fb;
+  --medidor-atencao: #fab219; --medidor-atencao-trilho: #fdebc4;
+  --medidor-critico: #d03b3b; --medidor-critico-trilho: #f6d3d3;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -62,6 +69,12 @@
     --neutro: #a8b8be; --neutro-fundo: #1b333c;
     --codigo-fundo: #061115;
     --avatar: #2a7d96;
+    --serie-1: #3987e5; --serie-2: #d95926; --serie-3: #199e70; --serie-4: #c98500;
+    --serie-5: #d55181; --serie-6: #008300; --serie-7: #9085e9; --serie-8: #e66767;
+    --serie-outros: #6f8288;
+    --medidor-normal: #3987e5; --medidor-normal-trilho: #184f95;
+    --medidor-atencao: #fab219; --medidor-atencao-trilho: #5a4210;
+    --medidor-critico: #d03b3b; --medidor-critico-trilho: #4f1d1d;
     color-scheme: dark;
   }
 }
@@ -783,3 +796,72 @@ body:has(.barra-selecao:not([hidden])) .toast { bottom: 92px; }
 .nota.sem-topo { margin: 4px 0 14px; }
 .avisos-lista { margin: 0 0 14px; }
 .so-leitor { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip-path: inset(50%); }
+
+/* ---------- uso ---------- */
+.periodo { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.periodo .botao[aria-pressed="true"] { background: var(--botao); color: #fff; border-color: var(--botao); }
+.medidor { display: block; height: 6px; border-radius: 99px; overflow: hidden; margin: 6px 0 2px; background: var(--medidor-normal-trilho); }
+.medidor > span { display: block; height: 100%; border-radius: 99px; background: var(--medidor-normal); }
+.medidor.atencao { background: var(--medidor-atencao-trilho); }
+.medidor.atencao > span { background: var(--medidor-atencao); }
+.medidor.critico { background: var(--medidor-critico-trilho); }
+.medidor.critico > span { background: var(--medidor-critico); }
+.cartao-backup .botao { align-self: flex-start; margin-top: 6px; }
+.graficos-uso { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; margin-bottom: 18px; }
+.grafico { position: relative; margin: 0; padding: 16px 16px 10px; background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio); min-width: 0; }
+.grafico figcaption { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.grafico figcaption strong { font: 600 15px/1.3 var(--titulo); }
+.grafico figcaption span { font-size: 12.5px; color: var(--suave); }
+.legenda { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; padding: 0; font-size: 12.5px; color: var(--suave); }
+.legenda li { display: inline-flex; align-items: center; gap: 6px; }
+.chave { display: inline-block; width: 14px; height: 2px; border-radius: 2px; background: currentColor; flex: none; }
+.grafico-area { position: relative; width: 100%; outline-offset: 4px; touch-action: pan-y; }
+.grafico-area svg { display: block; overflow: visible; }
+.grafico .grade { stroke: var(--linha); stroke-width: 1; }
+.grafico .base { stroke: var(--linha-forte); stroke-width: 1; }
+.grafico .eixo { fill: var(--suave); font: 11px var(--corpo); font-variant-numeric: tabular-nums; }
+.grafico .linha { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; stroke: currentColor; }
+.grafico .guia { stroke: var(--linha-forte); stroke-width: 1; }
+.grafico .ponto { fill: currentColor; stroke: var(--superficie); stroke-width: 2; }
+.grafico-vazio { padding: 40px 0; text-align: center; }
+.dica-grafico {
+  position: absolute; z-index: 5; min-width: 170px; padding: 8px 10px; pointer-events: none;
+  background: var(--superficie); border: 1px solid var(--linha-forte); border-radius: var(--raio-p);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .14); font-size: 12.5px;
+}
+.dica-quando { color: var(--suave); margin-bottom: 4px; }
+.dica-linha { display: flex; align-items: center; gap: 7px; line-height: 1.6; }
+.dica-linha strong { font-variant-numeric: tabular-nums; min-width: 52px; }
+.dica-linha span:last-child { color: var(--suave); }
+.serie-1 { color: var(--serie-1); } .serie-2 { color: var(--serie-2); } .serie-3 { color: var(--serie-3); }
+.serie-4 { color: var(--serie-4); } .serie-5 { color: var(--serie-5); } .serie-6 { color: var(--serie-6); }
+.serie-7 { color: var(--serie-7); } .serie-8 { color: var(--serie-8); } .serie-outros { color: var(--serie-outros); }
+.tabela-uso th[scope=row] { font-weight: 400; text-align: left; }
+.tabela-uso .nome-sistema { font-weight: 600; }
+.tabela-uso .sub { color: var(--suave); font-size: 12.5px; margin-top: 3px; }
+.tabela-uso td, .tabela-uso th { vertical-align: top; }
+.tabela-uso .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tabela-uso .valor-uso { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tabela-uso .valor-uso span { color: var(--suave); font-size: 13px; }
+.tabela-uso td .medidor { max-width: 160px; }
+.tabela-uso .linha-infra { background: var(--superficie-2); }
+.uso-rodape { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; margin-top: 16px; }
+.uso-rodape .painel { margin: 0; }
+.barras-disco { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.barras-disco li { display: grid; grid-template-columns: minmax(150px, 1.2fr) 2fr auto; align-items: center; gap: 12px; font-size: 13.5px; }
+.barras-disco .trilho { height: 12px; }
+.barras-disco .barra { display: block; height: 100%; background: var(--serie-1); border-radius: 0 4px 4px 0; }
+.barras-disco .valor { font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+.lista-eventos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
+.lista-eventos li { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; }
+.lista-eventos small { color: var(--suave); white-space: nowrap; }
+.resumo-limites { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px 14px; margin-bottom: 16px; background: var(--superficie-2); border-radius: var(--raio-p); }
+.resumo-limites strong { display: block; font: 600 15px/1.3 var(--titulo); }
+@media (max-width: 720px) {
+  .graficos-uso, .uso-rodape { grid-template-columns: 1fr; }
+  .barras-disco li { grid-template-columns: 1fr auto; }
+  .barras-disco .trilho { grid-column: 1 / -1; grid-row: 2; }
+  .resumo-limites { grid-template-columns: 1fr 1fr; }
+  .lista-eventos li { grid-template-columns: 1fr; gap: 2px; }
+}
+.tabela-uso .alerta-limite { color: var(--atencao); max-width: 220px; white-space: normal; }

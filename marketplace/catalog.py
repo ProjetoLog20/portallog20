@@ -20,6 +20,30 @@ PUBLICO_RE = re.compile(r"^/[A-Za-z0-9._~/-]*\*?$")
 REF_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,99}$")
 
 
+def memoria_mb(valor) -> int:
+    """'512m', '1g', '1.5g', '768' (MB) ou 768 -> megabytes. 0 = sem limite."""
+    texto = str(valor).strip().lower().replace(",", ".")
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(m|mb|mib|g|gb|gib)?", texto)
+    if not m:
+        raise ValueError(f"memoria invalida: '{valor}' (use, por exemplo, 512m ou 1.5g)")
+    n = float(m.group(1)) * (1024 if (m.group(2) or "m").startswith("g") else 1)
+    mb = int(round(n))
+    if mb and mb < 64:
+        raise ValueError("memoria minima: 64m")
+    return mb
+
+
+def cpus_validas(valor) -> float:
+    """0.5, 1, 2... (nucleos). 0 = sem limite."""
+    try:
+        n = round(float(str(valor).replace(",", ".")), 2)
+    except ValueError as exc:
+        raise ValueError(f"cpus invalido: '{valor}' (use, por exemplo, 0.5 ou 2)") from exc
+    if n and not 0.1 <= n <= 256:
+        raise ValueError("cpus deve ficar entre 0.1 e 256")
+    return n
+
+
 class ManifestoInvalido(ValueError):
     pass
 
@@ -84,6 +108,9 @@ class Solucao:
     backup_incluir: bool = True
     backup_externo: str = ""
     backup_esquemas: list[str] = field(default_factory=list)
+    # [recursos]: limites sugeridos por quem fez a solucao (None = padrao do servidor).
+    recursos_memoria_mb: int | None = None
+    recursos_cpus: float | None = None
 
     @property
     def container(self) -> str:
@@ -190,6 +217,15 @@ def carregar_manifesto(caminho: Path) -> Solucao:
                 )
         banco = {str(k): str(v) for k, v in mapa.items()}
 
+    sec_rec = dados.get("recursos", {})
+    if not isinstance(sec_rec, dict):
+        raise ManifestoInvalido(f"{caminho}: [recursos] deve ser uma tabela")
+    try:
+        rec_mem = memoria_mb(sec_rec["memoria"]) if "memoria" in sec_rec else None
+        rec_cpus = cpus_validas(sec_rec["cpus"]) if "cpus" in sec_rec else None
+    except ValueError as exc:
+        raise ManifestoInvalido(f"{caminho}: [recursos] {exc}") from exc
+
     sec_backup = dados.get("backup", {})
     if not isinstance(sec_backup, dict):
         raise ManifestoInvalido(f"{caminho}: [backup] deve ser uma tabela")
@@ -254,6 +290,8 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         backup_incluir=bool(sec_backup.get("incluir", True)),
         backup_externo=externo,
         backup_esquemas=list(esquemas),
+        recursos_memoria_mb=rec_mem,
+        recursos_cpus=rec_cpus,
     )
 
 
