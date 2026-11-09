@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import html
+import os
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -740,6 +742,9 @@ def api_backups(_: Usuario = Depends(exigir_admin)) -> dict:
         "proximo": proximo.isoformat(timespec="minutes") if proximo else None,
         "tarefa": _tarefa_backup(),
         "backups": [resumo(m) for m in BACKUPS.listar()],
+        "importacoes": BACKUPS.listar_importacoes(),
+        "importacao_max_gb": IMPORTACAO_MAX_GB,
+        "importacao_versao": BACKUPS.versao_servidor(),
         "solucoes": solucoes,
     }
 
@@ -827,4 +832,75 @@ def api_backup_apagar(nome: str, autor: Usuario = Depends(exigir_admin)) -> dict
     except ErroBackup as exc:
         raise HTTPException(409, str(exc)) from exc
     AUTH.registrar(autor, "Apagou backup", nome)
+    return {"ok": True}
+
+
+# ---------------- importar arquivo (.sql, .dump, .zip, .tar.gz) ----------------
+
+IMPORTACAO_MAX_GB = float(os.environ.get("PORTAL_IMPORTACAO_MAX_GB", "").strip() or 10)
+
+
+@app.post("/api/backups/importacoes")
+async def api_importacao_enviar(request: Request, nome: str = "", autor: Usuario = Depends(exigir_admin)) -> dict:
+    """Recebe o arquivo no corpo da requisicao (sem formulario), gravando direto no disco."""
+    from starlette.concurrency import run_in_threadpool
+
+    try:
+        iid, destino = BACKUPS.nova_importacao(nome)
+    except ErroBackup as exc:
+        raise HTTPException(400, str(exc)) from exc
+    limite = int(IMPORTACAO_MAX_GB * 1024 ** 3)
+    total = 0
+    try:
+        with open(destino, "wb") as fh:
+            async for parte in request.stream():
+                total += len(parte)
+                if total > limite:
+                    raise ErroBackup(f"Arquivo maior que o limite de {IMPORTACAO_MAX_GB:g} GB (PORTAL_IMPORTACAO_MAX_GB).")
+                fh.write(parte)
+        if total == 0:
+            raise ErroBackup("O arquivo chegou vazio.")
+        info = await run_in_threadpool(BACKUPS.analisar_importacao, iid, destino)
+    except ErroBackup as exc:
+        with contextlib.suppress(ErroBackup):
+            BACKUPS.apagar_importacao(iid)
+        raise HTTPException(400, str(exc)) from exc
+    except Exception:
+        with contextlib.suppress(ErroBackup):
+            BACKUPS.apagar_importacao(iid)
+        raise
+    AUTH.registrar(autor, "Enviou arquivo para importar", f"{info['arquivo']} ({formatar_tamanho(total)})")
+    return info
+
+
+@app.post("/api/backups/importacoes/{iid}/aplicar")
+def api_importacao_aplicar(iid: str, solucao: str = Body(..., embed=True), chave: str = Body("", embed=True),
+                           juntar: bool = Body(False, embed=True), confirmacao: str = Body("", embed=True),
+                           autor: Usuario = Depends(exigir_admin)) -> dict:
+    if confirmacao.strip() != solucao:
+        raise HTTPException(400, "Digite o identificador da solucao para confirmar.")
+    _solucao(solucao)
+    t = ger().tarefas.get(solucao)
+    if t and t.estado == "executando":
+        raise HTTPException(409, f"A solucao tem uma operacao em andamento: {t.acao}")
+    try:
+        info = BACKUPS.importacao(iid)
+
+        def rodar(tarefa) -> None:
+            tarefa.etapa = f"Importando em {solucao}"
+            BACKUPS.aplicar_importacao(iid, solucao, chave=chave, juntar=juntar, registrar=tarefa.registrar)
+
+        BACKUPS.em_segundo_plano(f"importar {info['arquivo']} em {solucao}", rodar)
+    except ErroBackup as exc:
+        raise HTTPException(409, str(exc)) from exc
+    AUTH.registrar(autor, "Importou arquivo", f"{info['arquivo']} em {solucao}" + (f" ({chave})" if chave else " (banco)"))
+    return {"ok": True}
+
+
+@app.delete("/api/backups/importacoes/{iid}")
+def api_importacao_apagar(iid: str, _: Usuario = Depends(exigir_admin)) -> dict:
+    try:
+        BACKUPS.apagar_importacao(iid)
+    except ErroBackup as exc:
+        raise HTTPException(404, str(exc)) from exc
     return {"ok": True}

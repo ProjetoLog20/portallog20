@@ -24,6 +24,7 @@ PostgreSQL para os volumes): o portal nao precisa de cliente de banco instalado.
 from __future__ import annotations
 
 import contextlib
+import gzip
 import hashlib
 import json
 import os
@@ -50,7 +51,7 @@ except ImportError:  # pragma: no cover
     fcntl = None
 
 VERSAO_FORMATO = 1
-MOTIVOS = {"agendado", "manual", "antes-de-atualizar", "antes-de-restaurar"}
+MOTIVOS = {"agendado", "manual", "antes-de-atualizar", "antes-de-restaurar", "antes-de-importar"}
 NOME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{6}_[a-z-]+$")
 HORARIO_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 SUFIXOS_TEMPORARIOS = ("_restaurando", "_verificacao")
@@ -591,7 +592,7 @@ class Backups:
     def _contar_tabelas_dump(self, pg: str, arq: Path) -> int:
         """Le o indice do dump (pg_restore --list): confirma que o arquivo esta inteiro."""
         saida = docker_cli.de_arquivo(["exec", "-i", pg, "pg_restore", "--list"], arq, timeout=600)
-        return sum(1 for linha in saida.splitlines() if re.search(r"\bTABLE\b(?! DATA)", linha) and not linha.startswith(";"))
+        return _tabelas_no_indice(saida)
 
     def _backup_volume(self, parcial: Path, item, sid: str, chave: str, nome_vol: str) -> None:
         (parcial / "volumes").mkdir(exist_ok=True)
@@ -655,11 +656,14 @@ class Backups:
                     break
                 vistos.append(k)
                 ficar.add(m["nome"])
-        ficar.update(m["nome"] for m in avulsos[:aj.manter_avulsos])
+        # Manuais/antes de atualizar (completos) e os de seguranca (parciais, so uma solucao)
+        # contam separado: varios testes de restauracao nao empurram os completos para fora.
+        ficar.update(m["nome"] for m in [a for a in avulsos if not a.get("parcial")][:aj.manter_avulsos])
+        ficar.update(m["nome"] for m in [a for a in avulsos if a.get("parcial")][:aj.manter_avulsos])
         ficar.update(m["nome"] for m in lista if m.get("fixado"))
-        ok = [m for m in lista if m.get("ok")]
-        if ok:  # nunca apaga o ultimo backup bom
-            ficar.add(ok[0]["nome"])
+        completos_ok = [m for m in lista if m.get("ok") and not m.get("parcial")]
+        if completos_ok:  # nunca apaga o ultimo backup completo bom
+            ficar.add(completos_ok[0]["nome"])
         return ficar
 
     def aplicar_retencao(self, aj: Ajustes, registrar=print, pasta: Path | None = None) -> list[str]:
@@ -749,17 +753,29 @@ class Backups:
         return resultado
 
     # ======================================================================== restauracao
-    def _restaurar_em(self, pg: str, arq: Path, banco: str, dono: str | None, manter: bool) -> int:
-        """pg_restore num banco novo `banco` (apagado antes, se existir). Tudo numa transacao: se
-        qualquer comando falhar, nada fica pela metade. Devolve o numero de tabelas."""
+    def _restaurar_em(self, pg: str, arq: Path, banco: str, dono: str | None, manter: bool,
+                      formato: str = "dump") -> int:
+        """Carrega `arq` num banco novo `banco` (apagado antes, se existir). Tudo numa transacao: se
+        qualquer comando falhar, nada fica pela metade. Devolve o numero de tabelas.
+
+        formato "dump": pg_dump -Fc (pg_restore); "sql": SQL puro (psql), ja sem donos e permissoes.
+        Com `dono`, os objetos criados ficam desse usuario (o da solucao)."""
         banco = _ident(banco)
         _psql(pg, f"DROP DATABASE IF EXISTS {banco} WITH (FORCE)")
         _psql(pg, f"CREATE DATABASE {banco} OWNER {_ident(dono or 'postgres')} ENCODING 'UTF8' TEMPLATE template0")
         _psql(pg, f"REVOKE ALL ON DATABASE {banco} FROM PUBLIC")
-        args = ["exec", "-i", pg, "pg_restore", "-U", "postgres", "-d", banco, "--no-owner", "--no-privileges",
-                "--single-transaction", "--exit-on-error"]
-        if dono:
-            args.append(f"--role={_ident(dono)}")
+        if formato == "sql":
+            # -o /dev/null: so os erros aparecem no registro (nao o resultado de cada SELECT do arquivo).
+            args = ["exec", "-i", pg, "psql", "-q", "-X", "-o", "/dev/null", "-U", "postgres", "-d", banco,
+                    "-v", "ON_ERROR_STOP=1", "--single-transaction"]
+            if dono:
+                args += ["-c", f"SET ROLE {_ident(dono)}"]
+            args += ["-f", "-"]
+        else:
+            args = ["exec", "-i", pg, "pg_restore", "-U", "postgres", "-d", banco, "--no-owner", "--no-privileges",
+                    "--single-transaction", "--exit-on-error"]
+            if dono:
+                args.append(f"--role={_ident(dono)}")
         try:
             docker_cli.de_arquivo(args, arq, timeout=3600)
             tabelas = int(_psql(pg, "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN "
@@ -772,23 +788,24 @@ class Backups:
             _psql(pg, f"DROP DATABASE IF EXISTS {banco} WITH (FORCE)")
         return tabelas
 
-    def _restaurar_banco(self, pg: str, arq: Path, banco: str, dono: str, registrar) -> None:
+    def _restaurar_banco(self, pg: str, arq: Path, banco: str, dono: str, registrar, formato: str = "dump") -> None:
         """Restaura num banco temporario e, so se tudo der certo, troca pelo atual."""
         banco, dono = _ident(banco), _ident(dono)
         tmp = f"{banco[:50]}_restaurando"
         registrar(f"Restaurando o banco {banco} (primeiro num banco temporario)")
-        tabelas = self._restaurar_em(pg, arq, tmp, dono=dono, manter=True)
+        tabelas = self._restaurar_em(pg, arq, tmp, dono=dono, manter=True, formato=formato)
         registrar(f"  {tabelas} tabela(s) restaurada(s); trocando pelo banco atual")
         _psql(pg, f"DROP DATABASE IF EXISTS {banco} WITH (FORCE)")
         _psql(pg, f"ALTER DATABASE {tmp} RENAME TO {banco}")
         registrar(f"  ok  banco {banco} restaurado")
 
-    def _restaurar_volume(self, arq: Path, nome_vol: str, registrar) -> None:
-        registrar(f"Restaurando a pasta de dados {nome_vol}")
+    def _restaurar_volume(self, arq: Path, nome_vol: str, registrar, juntar: bool = False) -> None:
+        registrar(f"Restaurando a pasta de dados {nome_vol}" + (" (mantendo os arquivos que ja estao la)" if juntar else ""))
+        limpar = "" if juntar else "find /dados -mindepth 1 -delete && "
         docker_cli.de_arquivo(
             ["run", "--rm", "-i", "--network", "none", "-v", f"{nome_vol}:/dados", "--entrypoint", "sh",
              self.cfg.backup_imagem, "-c",
-             "find /dados -mindepth 1 -delete && tar -xzf - --numeric-owner -p -C /dados"], arq)
+             f"{limpar}tar -xzf - --numeric-owner -p -C /dados"], arq)
         registrar(f"  ok  {nome_vol} restaurado")
 
     def restaurar_solucao(self, nome: str, sid: str, banco: bool = True, arquivos: bool = True,
@@ -912,6 +929,344 @@ class Backups:
                 dono = "postgres"
             self._restaurar_banco(pg, pasta / it["arquivo"], it["banco"], dono, registrar)
 
+    # ======================================================================== importar arquivo
+    # Um arquivo trazido de fora (ex.: pg_dump da maquina de quem desenvolveu, ou um .zip com
+    # planilhas) vira os dados de uma solucao. Dois passos: receber (o arquivo e analisado e fica
+    # em <pasta>/importacoes/<id>/) e aplicar (com backup de seguranca e a mesma troca segura
+    # da restauracao). Arquivos recebidos e nao usados somem depois de 7 dias.
+
+    @property
+    def pasta_importacoes(self) -> Path:
+        return self.pasta / "importacoes"
+
+    def nova_importacao(self, nome_original: str) -> tuple[str, Path]:
+        """Reserva uma pasta e devolve (id, caminho onde gravar o arquivo enviado)."""
+        nome = Path(str(nome_original).replace("\\", "/")).name.strip() or "arquivo"
+        if not re.fullmatch(r"[\w .()+-]{1,120}", nome, flags=re.UNICODE):
+            nome = re.sub(r"[^\w.()+-]", "_", nome)[:120] or "arquivo"
+        self._preparar_pasta(self.pasta)
+        self._preparar_pasta(self.pasta_importacoes)
+        livre = shutil.disk_usage(self.pasta).free
+        if livre < self.ajustes().espaco_minimo_gb * 1024 ** 3:
+            raise ErroBackup(f"Pouco espaco livre na pasta de backup ({formatar_tamanho(livre)}).")
+        iid = f"{datetime.now(fuso(self.cfg)):%Y%m%d-%H%M%S}-{os.urandom(3).hex()}"
+        pasta = self.pasta_importacoes / iid
+        pasta.mkdir(mode=0o700)
+        (pasta / "info.json").write_text(json.dumps({"id": iid, "arquivo": nome, "estado": "recebendo"}), encoding="utf-8")
+        return iid, pasta / f"original-{nome}"
+
+    def _pasta_importacao(self, iid: str) -> Path:
+        if not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{6}", iid):
+            raise ErroBackup("Importacao desconhecida.")
+        pasta = self.pasta_importacoes / iid
+        if not (pasta / "info.json").is_file():
+            raise ErroBackup("Importacao desconhecida (ja usada ou apagada).")
+        return pasta
+
+    def importacao(self, iid: str) -> dict:
+        return json.loads((self._pasta_importacao(iid) / "info.json").read_text(encoding="utf-8"))
+
+    def _gravar_importacao(self, info: dict) -> None:
+        pasta = self._pasta_importacao(info["id"])
+        (pasta / "info.json").write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def listar_importacoes(self) -> list[dict]:
+        if not self.pasta_importacoes.is_dir():
+            return []
+        lista = []
+        for p in sorted(self.pasta_importacoes.iterdir(), reverse=True):
+            if not p.is_dir():
+                continue
+            if time.time() - p.stat().st_mtime > 7 * 86400:
+                shutil.rmtree(p, ignore_errors=True)
+                continue
+            with contextlib.suppress(OSError, ValueError):
+                info = json.loads((p / "info.json").read_text(encoding="utf-8"))
+                if info.get("estado") == "pronto":
+                    lista.append({k: v for k, v in info.items() if k != "preparado"})
+        return lista
+
+    def apagar_importacao(self, iid: str) -> None:
+        shutil.rmtree(self._pasta_importacao(iid), ignore_errors=True)
+
+    def versao_servidor(self) -> int:
+        """Versao principal do PostgreSQL do servidor (ex.: 17); 0 se nao der para saber."""
+        if getattr(self, "_versao_pg", 0):
+            return self._versao_pg
+        pg = self.cfg.postgres_container
+        if not pg:
+            return 0
+        with contextlib.suppress(Exception):
+            self._versao_pg = int(_psql(pg, "SHOW server_version_num")) // 10000
+            return self._versao_pg
+        return 0
+
+    def analisar_importacao(self, iid: str, original: Path) -> dict:
+        """Descobre o que e o arquivo e o prepara para importar. Erros viram ErroBackup com a
+        explicacao (e a pasta e apagada)."""
+        pasta = self._pasta_importacao(iid)
+        info = self.importacao(iid)
+        try:
+            info.update(self._analisar(pasta, original))
+        except Exception:
+            shutil.rmtree(pasta, ignore_errors=True)
+            raise
+        info.update(estado="pronto", bytes_original=original.stat().st_size,
+                    recebido_em=datetime.now(fuso(self.cfg)).isoformat(timespec="seconds"))
+        if info["preparado"] != original.name:
+            original.unlink(missing_ok=True)
+        self._gravar_importacao(info)
+        return {k: v for k, v in info.items() if k != "preparado"}
+
+    def _analisar(self, pasta: Path, original: Path) -> dict:
+        with open(original, "rb") as fh:
+            cabeca = fh.read(4096)
+        if not cabeca:
+            raise ErroBackup("O arquivo esta vazio.")
+        if cabeca[:5] == b"PGDMP":
+            return self._analisar_dump(original)
+        if cabeca[:4] == b"PK\x03\x04":
+            return self._preparar_arquivos_zip(pasta, original)
+        if cabeca[:2] == b"\x1f\x8b":
+            with gzip.open(original, "rb") as gz:
+                interno = gz.read(4096)
+            if interno[257:262] == b"ustar":
+                return self._preparar_arquivos_tar(pasta, original, "r:gz")
+            if interno[:5] == b"PGDMP":
+                destino = pasta / "banco.dump"
+                with gzip.open(original, "rb") as gz, open(destino, "wb") as saida:
+                    shutil.copyfileobj(gz, saida, 1 << 20)
+                return self._analisar_dump(destino)
+            return self._preparar_sql(pasta, original, compactado=True)
+        if cabeca[257:262] == b"ustar":
+            return self._preparar_arquivos_tar(pasta, original, "r:")
+        return self._preparar_sql(pasta, original, compactado=False)
+
+    def _analisar_dump(self, arq: Path) -> dict:
+        pg = self.cfg.postgres_container
+        if not pg:
+            raise ErroBackup("Este portal nao tem o PostgreSQL do servidor para ler o arquivo.")
+        servidor = self.versao_servidor()
+        try:
+            saida = docker_cli.de_arquivo(["exec", "-i", pg, "pg_restore", "--list"], arq, timeout=600)
+        except docker_cli.DockerError as exc:
+            msg = str(exc)
+            if "unsupported version" in msg or "versao nao suportada" in msg.lower():
+                raise ErroBackup(
+                    f"Este .dump foi gerado por um PostgreSQL mais novo que o do servidor ({servidor}) e nao "
+                    "pode ser lido. Gere de novo em SQL puro, que funciona entre versoes: "
+                    "pg_dump -h localhost -U <usuario> -d <banco> --no-owner --no-privileges -f arquivo.sql") from exc
+            raise ErroBackup(f"Nao consegui ler o .dump (arquivo incompleto ou corrompido?): {msg[-300:]}") from exc
+        origem = re.search(r"Dumped from database version:\s*(\d+)", saida)
+        ferramenta = re.search(r"Dumped by pg_dump version:\s*(\d+)", saida)
+        banco = re.search(r";\s+dbname:\s*(\S+)", saida)
+        tabelas = _tabelas_no_indice(saida)
+        return {"tipo": "banco", "formato": "dump", "preparado": arq.name, "tabelas": tabelas,
+                "versao_origem": int(origem.group(1)) if origem else None,
+                "versao_pg_dump": int(ferramenta.group(1)) if ferramenta else None,
+                "banco_origem": banco.group(1) if banco else "", "versao_servidor": servidor,
+                "avisos": [], "bytes": arq.stat().st_size}
+
+    # Linhas de dono e permissao do pg_dump sem --no-owner/--no-privileges: os usuarios da
+    # maquina de origem nao existem aqui, e quem manda no banco importado e o usuario da solucao.
+    _LINHA_DONO = re.compile(r"^ALTER [A-Z ]+ .+ OWNER TO \S+;$")
+    _LINHA_PERMISSAO = re.compile(r"^(GRANT|REVOKE) .+ (TO|FROM) \S+.*;$|^ALTER DEFAULT PRIVILEGES .+;$")
+
+    def _preparar_sql(self, pasta: Path, original: Path, compactado: bool) -> dict:
+        destino = pasta / "banco.sql"
+        abrir = (lambda: gzip.open(original, "rt", encoding="utf-8", errors="strict", newline="")) if compactado \
+            else (lambda: open(original, encoding="utf-8", errors="strict", newline=""))
+        origem = ferramenta = None
+        tabelas = linhas_dados = removidas = 0
+        em_copy = False
+        comeco: list[str] = []
+        try:
+            with abrir() as entrada, open(destino, "w", encoding="utf-8", newline="") as saida:
+                for n, linha in enumerate(entrada):
+                    if n < 40:
+                        comeco.append(linha)
+                        if "\x00" in linha:
+                            raise ErroBackup("Isto nao parece um arquivo SQL (tem conteudo binario).")
+                    sem_fim = linha.rstrip("\r\n")
+                    if em_copy:
+                        if sem_fim == "\\.":
+                            em_copy = False
+                        else:
+                            linhas_dados += 1
+                        saida.write(linha)
+                        continue
+                    if sem_fim.startswith("COPY ") and sem_fim.endswith("FROM stdin;"):
+                        em_copy = True
+                    elif sem_fim.startswith("CREATE TABLE "):
+                        tabelas += 1
+                    elif re.match(r"^\\(connect|c) ", sem_fim) or re.match(r"^CREATE DATABASE ", sem_fim):
+                        raise ErroBackup("O arquivo cria ou troca de banco (foi gerado com -C/--create ou pelo "
+                                         "pg_dumpall). Gere de novo so com o banco: pg_dump -d <banco> --no-owner "
+                                         "--no-privileges -f arquivo.sql")
+                    elif re.match(r"^(CREATE|ALTER) ROLE ", sem_fim):
+                        raise ErroBackup("O arquivo cria usuarios do banco (pg_dumpall). Use o pg_dump de um banco so.")
+                    elif self._LINHA_DONO.match(sem_fim) or self._LINHA_PERMISSAO.match(sem_fim):
+                        removidas += 1
+                        continue
+                    if origem is None and (m := re.match(r"^-- Dumped from database version (\d+)", sem_fim)):
+                        origem = int(m.group(1))
+                    if ferramenta is None and (m := re.match(r"^-- Dumped by pg_dump version (\d+)", sem_fim)):
+                        ferramenta = int(m.group(1))
+                    saida.write(linha)
+        except UnicodeDecodeError as exc:
+            raise ErroBackup("O arquivo nao esta em UTF-8 ou nao e texto. Envie o SQL do pg_dump, um .dump "
+                             "(pg_dump -Fc) ou um .zip/.tar.gz com arquivos.") from exc
+        except (OSError, EOFError) as exc:
+            raise ErroBackup(f"Nao consegui ler o arquivo: {exc}") from exc
+        texto = "".join(comeco)
+        if "PostgreSQL database cluster dump" in texto:
+            raise ErroBackup("Isto e um pg_dumpall (servidor inteiro). Use o pg_dump de um banco so.")
+        if tabelas == 0:
+            raise ErroBackup("Nao achei nenhuma tabela (CREATE TABLE) no arquivo. Envie o resultado do pg_dump do banco.")
+        servidor = self.versao_servidor()
+        avisos = []
+        if ferramenta and servidor and ferramenta > servidor:
+            avisos.append(f"Gerado pelo pg_dump {ferramenta}; o servidor usa o PostgreSQL {servidor}. Normalmente "
+                          "funciona; se algum comando nao existir aqui, a importacao para e nada muda.")
+        if removidas:
+            avisos.append(f"{removidas} linha(s) de dono e permissoes da maquina de origem foram ignoradas: "
+                          "no servidor, tudo fica do usuario da solucao.")
+        if em_copy:
+            raise ErroBackup("O arquivo termina no meio dos dados (incompleto). Gere e envie de novo.")
+        return {"tipo": "banco", "formato": "sql", "preparado": destino.name, "tabelas": tabelas,
+                "linhas_dados": linhas_dados, "versao_origem": origem, "versao_pg_dump": ferramenta,
+                "versao_servidor": servidor, "avisos": avisos, "bytes": destino.stat().st_size}
+
+    @staticmethod
+    def _nome_seguro_arquivo(nome: str) -> bool:
+        p = Path(nome.replace("\\", "/"))
+        return bool(nome) and not p.is_absolute() and ".." not in p.parts and not nome.startswith("/")
+
+    def _preparar_arquivos_tar(self, pasta: Path, original: Path, modo: str) -> dict:
+        destino = pasta / "arquivos.tar.gz"
+        n = total = 0
+        try:
+            with tarfile.open(original, modo) as tar:
+                membros = tar.getmembers()
+                nomes = {m.name.lstrip("./") for m in membros}
+                if "toc.dat" in nomes:
+                    raise ErroBackup("Isto e um pg_dump no formato tar (-Ft). Gere em -Fc (.dump) ou SQL puro.")
+                for m in membros:
+                    if not self._nome_seguro_arquivo(m.name) or not (m.isfile() or m.isdir()):
+                        if m.issym() or m.islnk():
+                            raise ErroBackup(f"O pacote tem atalhos (links), que nao sao aceitos: {m.name}")
+                        if not (m.isfile() or m.isdir()):
+                            raise ErroBackup(f"Item nao aceito no pacote: {m.name}")
+                        raise ErroBackup(f"Caminho nao aceito no pacote: {m.name}")
+                    if m.isfile():
+                        n += 1
+                        total += m.size
+                if modo == "r:gz":
+                    shutil.copyfile(original, destino)
+                else:
+                    with tarfile.open(destino, "w:gz") as novo:
+                        for m in membros:
+                            novo.addfile(m, tar.extractfile(m) if m.isfile() else None)
+        except tarfile.TarError as exc:
+            raise ErroBackup(f"Pacote .tar invalido: {exc}") from exc
+        return self._info_arquivos(destino, n, total)
+
+    def _preparar_arquivos_zip(self, pasta: Path, original: Path) -> dict:
+        import zipfile
+
+        destino = pasta / "arquivos.tar.gz"
+        n = total = 0
+        try:
+            with zipfile.ZipFile(original) as z, tarfile.open(destino, "w:gz") as tar:
+                for zi in z.infolist():
+                    nome = zi.filename.replace("\\", "/")
+                    if not self._nome_seguro_arquivo(nome):
+                        raise ErroBackup(f"Caminho nao aceito no .zip: {zi.filename}")
+                    ti = tarfile.TarInfo(nome.rstrip("/"))
+                    ti.mtime = time.mktime(zi.date_time + (0, 0, -1))
+                    if zi.is_dir():
+                        ti.type, ti.mode = tarfile.DIRTYPE, 0o755
+                        tar.addfile(ti)
+                        continue
+                    ti.size, ti.mode = zi.file_size, 0o644
+                    with z.open(zi) as dados:
+                        tar.addfile(ti, dados)
+                    n += 1
+                    total += zi.file_size
+        except zipfile.BadZipFile as exc:
+            raise ErroBackup(f".zip invalido: {exc}") from exc
+        return self._info_arquivos(destino, n, total)
+
+    def _info_arquivos(self, destino: Path, n: int, total: int) -> dict:
+        if n == 0:
+            raise ErroBackup("O pacote nao tem nenhum arquivo.")
+        return {"tipo": "arquivos", "formato": "tar.gz", "preparado": destino.name, "arquivos": n,
+                "bytes_conteudo": total, "avisos": [], "bytes": destino.stat().st_size}
+
+    def aplicar_importacao(self, iid: str, sid: str, chave: str = "", juntar: bool = False,
+                           registrar: Callable[[str], None] = print) -> None:
+        """Coloca o arquivo recebido no banco ou numa pasta de dados da solucao `sid`."""
+        pasta = self._pasta_importacao(iid)
+        info = self.importacao(iid)
+        if info.get("estado") != "pronto":
+            raise ErroBackup("O arquivo ainda nao foi analisado.")
+        ger = self._ger()
+        sol = ger.solucoes.get(sid)
+        if sol is None:
+            raise ErroBackup(f"Solucao desconhecida: {sid}")
+        pg = self.cfg.postgres_container
+        arq = pasta / info["preparado"]
+        if info["tipo"] == "banco":
+            if not sol.banco or not pg:
+                raise ErroBackup(f"{sol.nome} nao usa o banco do servidor; nao ha onde importar.")
+            guardado = ger.armazenamento.banco(sid) or {}
+            if not guardado.get("senha"):
+                raise ErroBackup(f"O banco de {sol.nome} ainda nao foi criado. Inicie a solucao uma vez (o portal "
+                                 "cria o banco) e importe depois.")
+            nome_banco, dono = guardado.get("nome") or banco_pg.nomes(sid)[0], banco_pg.nomes(sid)[1]
+        else:
+            if chave not in sol.volumes:
+                raise ErroBackup(f"Escolha uma pasta de dados de {sol.nome}: {', '.join(sol.volumes) or 'nenhuma'}.")
+            nome_vol = sol.nome_volume(chave)
+
+        registrar(f"Importando {info['arquivo']} em {sol.nome}")
+        registrar("Backup de seguranca antes de importar")
+        seg = self.fazer("antes-de-importar", lambda l: registrar("  " + l), somente=[sid])
+        if not seg["ok"]:
+            raise ErroBackup("O backup de seguranca teve erros; nada foi importado. " + "; ".join(seg["erros"]))
+
+        falha: Exception | None = None
+        with Trava(self.pasta).segurar():
+            info_c = docker_cli.container_inspect(sol.container)
+            estava_no_ar = bool(info_c and info_c.get("State", {}).get("Running"))
+            try:
+                if info_c:
+                    registrar(f"Parando {sol.container}")
+                    docker_cli.stop(sol.container)
+                if info["tipo"] == "banco":
+                    banco_pg.garantir(pg, sid, guardado["senha"], registrar)
+                    self._restaurar_banco(pg, arq, nome_banco, dono, registrar, formato=info["formato"])
+                else:
+                    self._restaurar_volume(arq, nome_vol, registrar, juntar=juntar)
+            except Exception as exc:  # noqa: BLE001
+                falha = exc
+                registrar(f"ERRO: {exc}")
+        if estava_no_ar:
+            registrar(f"Iniciando {sid} de novo")
+            tarefa = _TarefaRepasse("iniciar", registrar)
+            ger._rodar(sol, tarefa)
+            if tarefa.estado != "concluida" and falha is None:
+                raise ErroBackup(f"Arquivo importado, mas a solucao nao subiu: {tarefa.erro}")
+        else:
+            registrar("A solucao estava parada e continua parada. Inicie quando quiser.")
+        if falha is not None:
+            raise ErroBackup(f"Importacao interrompida: {falha}. Os dados atuais nao foram trocados"
+                             + (" (o banco so e trocado se a importacao inteira der certo)." if info["tipo"] == "banco"
+                                else "; o backup de seguranca esta na lista."))
+        shutil.rmtree(pasta, ignore_errors=True)
+        registrar("Importacao concluida. O arquivo enviado foi apagado do servidor.")
+        self.auditoria("Importou arquivo", f"{info['arquivo']} em {sid}" + (f" ({chave})" if chave else " (banco)"))
+
     # ======================================================================== agendador
     def proximo(self, agora: datetime | None = None) -> datetime | None:
         aj = self.ajustes()
@@ -991,6 +1346,11 @@ class _TarefaRepasse(Tarefa):
     def registrar(self, linha: str) -> None:
         super().registrar(linha)
         self._repassar("  " + str(linha))
+
+
+def _tabelas_no_indice(saida: str) -> int:
+    """Conta as tabelas no indice do pg_restore --list (linhas "123; 1259 16390 TABLE esquema nome dono")."""
+    return sum(1 for linha in saida.splitlines() if re.match(r"^\d+; \d+ \d+ TABLE (?!DATA )", linha))
 
 
 def _commit_portal() -> str:

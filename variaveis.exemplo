@@ -34,6 +34,8 @@ PORTAL_POSTGRES_SENHA=
 # PORTAL_BACKUP_MANTER_AVULSOS=10
 # PORTAL_BACKUP_ESPACO_MINIMO_GB=2
 # PORTAL_BACKUP_WEBHOOK=https://...      (recebe {"text": "..."} quando um backup falha)
+# Tamanho maximo de um arquivo enviado em Backups > Importar arquivo (GB):
+# PORTAL_IMPORTACAO_MAX_GB=10
 # Backup automatico antes de cada deploy/atualizar.sh (nao recomendado desligar):
 # PORTAL_BACKUP_ANTES_DE_ATUALIZAR=sim
 

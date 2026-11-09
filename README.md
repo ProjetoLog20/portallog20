@@ -292,6 +292,17 @@ certo (com erro, o atual fica intacto), restaura os arquivos e inicia de novo se
 **Conferir** faz uma restauração de teste de cada banco num banco temporário e confere o sha256 de
 cada arquivo, sem tocar no que está em uso; vale fazer de vez em quando.
 
+**Importar um arquivo de fora** (aba **Importar arquivo**): por exemplo, o banco da máquina de
+quem desenvolveu o sistema ou as planilhas que ele já tinha. Envie um `.sql` / `.sql.gz` (gerado
+com `pg_dump -d <banco> --no-owner --no-privileges -f banco.sql`), um `.dump` (`pg_dump -Fc`) ou
+um `.zip` / `.tar.gz` com arquivos. O portal confere o arquivo antes (recusa os que criam banco ou
+usuários, os incompletos, `.zip` com caminhos para fora da pasta e `.dump` de uma versão mais nova
+do PostgreSQL, que não abre no servidor; nesse caso, gere em SQL puro). Linhas de dono e
+permissões da máquina de origem são ignoradas: tudo fica do usuário da solução. Depois você
+escolhe a solução (e a pasta, para arquivos) e confirma; o caminho é o mesmo da restauração
+(backup de segurança, banco temporário, troca só se der certo). O arquivo enviado é apagado
+depois de usado, ou em 7 dias. Limite: `PORTAL_IMPORTACAO_MAX_GB` (padrão 10).
+
 Pelo terminal, na pasta do portal:
 
 ```bash

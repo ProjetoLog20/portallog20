@@ -602,7 +602,7 @@ async function telaSolucao(id) {
       h("section", { class: "painel" }, h("h2", {}, "Ficha técnica"), ficha, blocoLocal)),
     config: h("div", { class: "aba-painel" },
       h("section", { class: "painel estreito" }, h("h2", {}, "Configurações"),
-        h("p", { class: "nota topo" }, "Viram variáveis de ambiente da solução. As mudanças valem depois de Reiniciar."), formConfig)),
+        h("p", { class: "nota acima" }, "Viram variáveis de ambiente da solução. As mudanças valem depois de Reiniciar."), formConfig)),
     acesso: h("div", { class: "aba-painel colunas" },
       h("section", { class: "painel" }, h("h2", {}, "Quem acessa"), pessoas),
       h("section", { class: "painel" }, h("h2", {}, "Endereço"), formEndereco)),
@@ -1688,6 +1688,7 @@ const estadoBackups = { aba: "lista", dados: null, logAberto: false };
 const MOTIVOS_BACKUP = {
   agendado: "Automático", manual: "Manual", "antes-de-atualizar": "Antes de atualizar o portal",
   "antes-de-restaurar": "Segurança, antes de restaurar",
+  "antes-de-importar": "Segurança, antes de importar",
 };
 
 function tamanho(bytes) {
@@ -1713,7 +1714,7 @@ function rotuloItem(it, nomes) {
 async function telaBackups() {
   document.title = "Backups · Portal de Soluções LOG20";
   estadoBackups.dados = await api("/api/backups");
-  const abas = [["lista", "Backups"], ["ajustes", "Ajustes"]];
+  const abas = [["lista", "Backups"], ["importar", "Importar arquivo"], ["ajustes", "Ajustes"]];
   $conteudo.replaceChildren(
     h("section", { class: "intro intro-linha" },
       h("div", {}, h("h1", {}, "Backups"),
@@ -1728,6 +1729,7 @@ async function telaBackups() {
     h("div", { id: "backup-corpo" }));
   pintarResumoBackup();
   if (estadoBackups.aba === "ajustes") pintarAjustesBackup();
+  else if (estadoBackups.aba === "importar") pintarImportar();
   else pintarListaBackups();
 }
 
@@ -1737,6 +1739,8 @@ async function atualizarBackups() {
   pintarResumoBackup();
   const mudouLista = JSON.stringify(antes?.backups) !== JSON.stringify(estadoBackups.dados.backups);
   if (estadoBackups.aba === "lista" && mudouLista) pintarListaBackups();
+  const mudouImport = JSON.stringify(antes?.importacoes) !== JSON.stringify(estadoBackups.dados.importacoes);
+  if (estadoBackups.aba === "importar" && mudouImport && !document.querySelector("#backup-corpo :focus")) pintarImportacoes();
 }
 
 function pintarResumoBackup() {
@@ -1911,6 +1915,149 @@ function dialogoRestaurar(b, restauraveis, nomes) {
     corpo: form,
     rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), botao],
   });
+}
+
+/* ---------- importar arquivo ---------- */
+
+function enviarArquivo(arquivo, aoProgresso) {
+  // XMLHttpRequest para mostrar o progresso; o arquivo vai cru no corpo (o servidor grava direto no disco).
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/backups/importacoes?nome=${encodeURIComponent(arquivo.name)}`);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) aoProgresso(ev.loaded / ev.total); };
+    xhr.onload = () => {
+      let dados = {};
+      try { dados = JSON.parse(xhr.responseText || "{}"); } catch { /* resposta sem JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(dados);
+      else reject(new Error(dados.detail || `Erro ${xhr.status} ao enviar o arquivo.`));
+    };
+    xhr.onerror = () => reject(new Error("A conexão caiu durante o envio."));
+    xhr.send(arquivo);
+  });
+}
+
+function pintarImportar() {
+  const d = estadoBackups.dados;
+  const alvo = document.getElementById("backup-corpo");
+  const entrada = h("input", { type: "file", id: "imp-arquivo", class: "so-leitor", accept: ".sql,.gz,.dump,.backup,.zip,.tar,.tgz" });
+  const barra = h("div", { class: "progresso", hidden: true }, h("span", {}));
+  const estado = h("p", { class: "nota", "aria-live": "polite" });
+  const zona = h("label", { class: "zona-arquivo", for: "imp-arquivo" },
+    h("strong", {}, "Escolha um arquivo ou arraste para cá"),
+    h("span", {}, `.sql, .sql.gz ou .dump para um banco; .zip ou .tar.gz para uma pasta de dados. Até ${String(d.importacao_max_gb).replace(".", ",")} GB.`));
+  const enviar = async (arquivo) => {
+    if (!arquivo) return;
+    zona.classList.add("ocupada");
+    barra.hidden = false;
+    barra.firstChild.style.width = "0%";
+    estado.textContent = `Enviando ${arquivo.name} (${tamanho(arquivo.size)})…`;
+    try {
+      const info = await enviarArquivo(arquivo, (f) => {
+        barra.firstChild.style.width = `${Math.round(f * 100)}%`;
+        if (f >= 1) estado.textContent = "Recebido. Analisando o arquivo…";
+      });
+      estado.textContent = "";
+      toast(`${info.arquivo}: pronto para importar.`);
+      estadoBackups.dados = await api("/api/backups");
+      pintarImportacoes(info.id);
+    } catch (e) {
+      estado.textContent = "";
+      toast(e.message, "erro");
+    }
+    barra.hidden = true;
+    zona.classList.remove("ocupada");
+    entrada.value = "";
+  };
+  entrada.addEventListener("change", () => enviar(entrada.files[0]));
+  for (const ev of ["dragenter", "dragover"]) zona.addEventListener(ev, (e) => { e.preventDefault(); zona.classList.add("arrastando"); });
+  for (const ev of ["dragleave", "drop"]) zona.addEventListener(ev, () => zona.classList.remove("arrastando"));
+  zona.addEventListener("drop", (e) => { e.preventDefault(); enviar(e.dataTransfer.files[0]); });
+
+  alvo.replaceChildren(
+    h("section", { class: "painel" },
+      h("h2", {}, "Trazer dados de fora para uma solução"),
+      h("p", { class: "nota sem-topo" }, "Por exemplo, o banco da máquina de quem desenvolveu o sistema, ou as planilhas que ele já tinha. Primeiro o arquivo é enviado e conferido; nada muda até você escolher a solução e confirmar."),
+      entrada, zona, barra, estado,
+      h("details", { class: "como-gerar" },
+        h("summary", {}, "Como gerar o arquivo do banco"),
+        h("p", {}, "Na máquina onde o banco está hoje (PowerShell ou terminal):"),
+        h("pre", { class: "saida curta" }, "pg_dump -h localhost -U <usuario> -d <banco> --no-owner --no-privileges -f banco.sql"),
+        h("p", { class: "nota" }, `Use o SQL puro (.sql): ele funciona mesmo se o PostgreSQL de lá for mais novo que o do servidor${d.importacao_versao ? ` (${d.importacao_versao})` : ""}. O .dump (pg_dump -Fc) só abre se a versão de lá for igual ou mais antiga. Se esquecer o --no-owner, o portal ignora as linhas de dono e permissão.`))),
+    h("div", { id: "lista-importacoes" }));
+  pintarImportacoes();
+}
+
+function pintarImportacoes(destacar) {
+  const d = estadoBackups.dados;
+  const alvo = document.getElementById("lista-importacoes");
+  if (!alvo) return;
+  if (!d.importacoes.length) { alvo.replaceChildren(); return; }
+  alvo.replaceChildren(h("h2", { class: "titulo-secao" }, "Arquivos recebidos"),
+    ...d.importacoes.map((imp) => cartaoImportacao(imp, imp.id === destacar)));
+}
+
+function cartaoImportacao(imp, destacado) {
+  const d = estadoBackups.dados;
+  const banco = imp.tipo === "banco";
+  const opcoes = d.solucoes.filter((s) => (banco ? s.banco : s.volumes.length));
+  const detalhe = banco
+    ? [imp.formato === "sql" ? "Banco de dados (SQL)" : "Banco de dados (.dump)", plural(imp.tabelas, "tabela", "tabelas"),
+       imp.linhas_dados != null ? `${imp.linhas_dados.toLocaleString("pt-BR")} linhas de dados` : null,
+       imp.versao_origem ? `PostgreSQL ${imp.versao_origem} na origem` : null].filter(Boolean).join(" · ")
+    : `Arquivos · ${plural(imp.arquivos, "arquivo", "arquivos")} · ${tamanho(imp.bytes_conteudo)}`;
+  const descartar = h("button", { type: "button", class: "link-limpar", onclick: async () => {
+    try { await api(`/api/backups/importacoes/${imp.id}`, { method: "DELETE" }); toast("Arquivo descartado."); await atualizarBackups(); pintarImportacoes(); }
+    catch (e) { toast(e.message, "erro"); }
+  } }, "Descartar");
+  if (!opcoes.length) {
+    return h("section", { class: "painel importacao" },
+      h("div", { class: "linha-titulo" }, h("h3", {}, imp.arquivo), descartar),
+      h("p", { class: "nota" }, detalhe),
+      h("p", { class: "texto-erro" }, banco ? "Nenhuma solução usa o banco do servidor." : "Nenhuma solução tem pasta de dados."));
+  }
+  const sel = h("select", { name: "solucao" }, opcoes.map((s) => h("option", { value: s.id }, s.nome)));
+  const pasta = h("select", { name: "chave" });
+  const campoPasta = h("div", { class: "campo", hidden: banco }, h("label", {}, "Pasta de dados"), pasta,
+    h("label", { class: "campo-check topo-8" }, h("input", { type: "checkbox", name: "juntar" }),
+      h("span", {}, h("strong", {}, "Manter os arquivos que já estão na pasta"), h("small", {}, " Sem marcar, a pasta fica só com o conteúdo do arquivo enviado."))));
+  const conf = h("input", { type: "text", name: "confirmacao", autocomplete: "off", spellcheck: false });
+  const rotuloConf = h("label", {});
+  const botao = h("button", { type: "submit", class: "botao perigo-cheio", disabled: true }, "Importar");
+  const atualizarSel = () => {
+    const s = opcoes.find((o) => o.id === sel.value);
+    pasta.replaceChildren(...(s?.volumes || []).map((v) => h("option", { value: v }, v)));
+    rotuloConf.textContent = `Para confirmar, digite ${sel.value}`;
+    conf.value = "";
+    botao.disabled = true;
+  };
+  sel.addEventListener("change", atualizarSel);
+  conf.addEventListener("input", () => { botao.disabled = conf.value.trim() !== sel.value; });
+  atualizarSel();
+  const form = h("form", { class: "config" },
+    imp.avisos.length ? h("ul", { class: "avisos-lista" }, imp.avisos.map((a) => h("li", { class: "aviso-item atencao" }, h("p", {}, a)))) : null,
+    h("div", { class: "form-grade" }, h("div", { class: "campo" }, h("label", {}, "Solução"), sel), campoPasta),
+    h("p", { class: "nota" }, banco
+      ? "O banco atual da solução é substituído pelo do arquivo. Antes, o portal faz um backup de segurança; a importação vai primeiro para um banco temporário e só troca se tudo der certo. A solução é parada e, se estava no ar, volta no fim (as migrations completam o que faltar)."
+      : "Antes, o portal faz um backup de segurança da solução. A solução é parada e, se estava no ar, volta no fim."),
+    h("div", { class: "campo" }, rotuloConf, conf),
+    h("div", { class: "linha-botoes" }, botao));
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    botao.disabled = true;
+    try {
+      await api(`/api/backups/importacoes/${imp.id}/aplicar`, { method: "POST", body: {
+        solucao: sel.value, chave: banco ? "" : pasta.value, juntar: !banco && form.elements.juntar.checked, confirmacao: conf.value.trim() } });
+      estadoBackups.logAberto = true;
+      toast("Importação iniciada. Acompanhe o registro acima.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      await atualizarBackups();
+    } catch (e) { toast(e.message, "erro"); botao.disabled = false; }
+  });
+  return h("section", { class: `painel importacao${destacado ? " destacado" : ""}` },
+    h("div", { class: "linha-titulo" }, h("h3", {}, imp.arquivo), descartar),
+    h("p", { class: "nota sem-topo" }, `${detalhe} · recebido ${dataIso(imp.recebido_em).toLowerCase()}`),
+    form);
 }
 
 function pintarAjustesBackup() {

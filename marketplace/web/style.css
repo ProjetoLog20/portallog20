@@ -186,7 +186,7 @@ code { font-family: var(--mono); font-size: .93em; }
 .bloco h3 { margin: 0 0 8px; font-size: 14.5px; }
 
 .nota { font-size: 13px; color: var(--suave); margin: 8px 0 0; }
-.nota.topo { margin: -6px 0 18px; }
+.nota.acima { margin: -6px 0 18px; }
 .nota.centro { text-align: center; }
 .sub { color: var(--suave); font-size: 13px; }
 .nowrap { white-space: nowrap; }
@@ -758,3 +758,28 @@ body:has(.barra-selecao:not([hidden])) .toast { bottom: 92px; }
   .tabela-backups tr { padding: 12px 0; border-bottom: 1px solid var(--linha); }
   .tabela-backups td { border: 0 !important; padding: 4px 0 !important; }
 }
+
+/* ---------- importar arquivo ---------- */
+.zona-arquivo {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center;
+  min-height: 130px; padding: 20px; border: 2px dashed var(--linha-forte); border-radius: var(--raio);
+  background: var(--superficie-2, transparent); cursor: pointer; transition: border-color .15s, background .15s;
+}
+.zona-arquivo strong { font: 600 15.5px/1.3 var(--titulo); color: var(--link); }
+.zona-arquivo span { font-size: 13px; color: var(--suave); max-width: 60ch; }
+.zona-arquivo:hover, .zona-arquivo.arrastando { border-color: var(--cobre); background: var(--cobre-claro); }
+.zona-arquivo.ocupada { opacity: .6; pointer-events: none; }
+#imp-arquivo:focus-visible ~ .zona-arquivo { outline: 2px solid var(--cobre); outline-offset: 2px; }
+.progresso { height: 6px; margin-top: 12px; border-radius: 99px; background: var(--neutro-fundo); overflow: hidden; }
+.progresso span { display: block; height: 100%; width: 0; background: var(--cobre); transition: width .2s; }
+.como-gerar { margin-top: 14px; }
+.como-gerar summary { cursor: pointer; font-size: 13.5px; color: var(--link); }
+.como-gerar p { font-size: 14px; margin: 10px 0 0; }
+.titulo-secao { font-size: 16.5px; margin: 26px 0 12px; }
+.painel.importacao { margin-bottom: 14px; }
+.painel.importacao.destacado { border-left: 4px solid var(--cobre); }
+.painel.importacao .linha-titulo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.painel.importacao h3 { margin: 0; font-size: 15.5px; overflow-wrap: anywhere; }
+.nota.sem-topo { margin: 4px 0 14px; }
+.avisos-lista { margin: 0 0 14px; }
+.so-leitor { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip-path: inset(50%); }
