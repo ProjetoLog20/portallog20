@@ -18,6 +18,25 @@ PORTAL_GIT_TOKEN=
 # de cada solucao sozinho. So vale na primeira subida do banco; trocar depois nao muda nada.
 PORTAL_POSTGRES_SENHA=
 
+# ---- Backup (tela Backups) ----
+# Pasta dos backups nesta maquina. Padrao: a pasta backups/ dentro do portal. Melhor em outro
+# disco, se houver (ex.: /mnt/backup/portal).
+# PORTAL_BACKUP_PASTA_HOST=/mnt/backup/portal
+# Segunda copia de cada backup, ex.: uma pasta da rede montada na VM (/etc/fstab, cifs).
+# Sem esta linha, nao ha segunda copia. Uma copia fora da VM protege contra perder a VM inteira.
+# PORTAL_BACKUP_COPIA_HOST=/mnt/rede/backups-portal
+# Padroes da tela Backups (o que for salvo na tela vale mais que isto):
+# PORTAL_BACKUP_ATIVO=sim
+# PORTAL_BACKUP_HORARIOS=02:30
+# PORTAL_BACKUP_MANTER_DIARIOS=14
+# PORTAL_BACKUP_MANTER_SEMANAIS=8
+# PORTAL_BACKUP_MANTER_MENSAIS=6
+# PORTAL_BACKUP_MANTER_AVULSOS=10
+# PORTAL_BACKUP_ESPACO_MINIMO_GB=2
+# PORTAL_BACKUP_WEBHOOK=https://...      (recebe {"text": "..."} quando um backup falha)
+# Backup automatico antes de cada deploy/atualizar.sh (nao recomendado desligar):
+# PORTAL_BACKUP_ANTES_DE_ATUALIZAR=sim
+
 # Duracao da sessao de login, em horas.
 PORTAL_SESSAO_HORAS=12
 

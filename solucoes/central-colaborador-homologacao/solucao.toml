@@ -47,6 +47,12 @@ GEO_RESTRICTION_ENABLED = "false"
 dados = "/app/backend/data"
 uploads = "/app/backend/uploads"
 
+# Backup diario: copia o banco externo (Supabase) apontado por DATABASE_URL, so o esquema
+# public (as tabelas do sistema). Se a homologacao apontar para o mesmo banco, copia uma vez so.
+[backup]
+banco_externo = "DATABASE_URL"
+esquemas = ["public"]
+
 [[configuracoes]]
 nome = "YURI_AI_ENABLED"
 rotulo = "Ativar a IA do Yuri"

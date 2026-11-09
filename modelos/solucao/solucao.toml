@@ -159,6 +159,15 @@ ajuda = "Explique em uma frase o que muda quando esta opção está ligada."
 
 
 # ----------------------------------------------------------------------------
+# Backup (opcional). O portal ja copia todo dia o banco do servidor e os volumes da solucao.
+# ----------------------------------------------------------------------------
+# [backup]
+# incluir = false                 # tira a solucao do backup (ex.: dados descartaveis)
+# banco_externo = "DATABASE_URL"  # configuracao com uma URL postgresql:// de banco FORA do
+#                                 # servidor (ex.: Supabase), copiada com pg_dump
+# esquemas = ["public"]           # so estes esquemas do banco externo (padrao: todos)
+
+# ----------------------------------------------------------------------------
 # Usuarios de teste da PROPRIA aplicacao (mostrados so ao administrador do portal)
 # ----------------------------------------------------------------------------
 # Apague se a aplicacao nao tiver login proprio ou usuarios de demonstracao.

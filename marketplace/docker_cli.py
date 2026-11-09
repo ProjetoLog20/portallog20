@@ -194,3 +194,44 @@ def remove_volumes(volumes: Iterable[str]) -> None:
         result = _run(["volume", "rm", "-f", volume], timeout=60)
         if result.returncode != 0:
             _check(result, f"Falha ao remover o volume {volume}")
+
+
+def para_arquivo(args: list[str], destino: Path, env: dict[str, str] | None = None, timeout: float = 3600) -> None:
+    """Roda `docker <args>` gravando a saida (binaria) direto num arquivo, sem passar pela memoria.
+
+    Usado pelo backup (pg_dump, tar de volumes). `env` entra no ambiente do processo docker:
+    com `-e NOME` nos args, o valor chega ao container sem aparecer na linha de comando.
+    """
+    full_env = os.environ.copy()
+    if env:
+        full_env.update(env)
+    with open(destino, "wb") as saida:
+        try:
+            proc = subprocess.run([docker_bin(), *args], stdout=saida, stderr=subprocess.PIPE,
+                                  timeout=timeout, env=full_env)
+        except subprocess.TimeoutExpired as exc:
+            raise DockerError(f"Tempo esgotado executando: docker {' '.join(args[:3])}") from exc
+    if proc.returncode != 0:
+        detalhe = proc.stderr.decode("utf-8", "replace").strip()
+        raise DockerError(detalhe[-800:] or f"docker terminou com codigo {proc.returncode}")
+
+
+def de_arquivo(args: list[str], origem: Path, env: dict[str, str] | None = None, timeout: float = 3600) -> str:
+    """Roda `docker <args>` lendo a entrada de um arquivo (pg_restore, tar -x). Devolve a saida."""
+    full_env = os.environ.copy()
+    if env:
+        full_env.update(env)
+    with open(origem, "rb") as entrada:
+        try:
+            proc = subprocess.run([docker_bin(), *args], stdin=entrada, capture_output=True,
+                                  timeout=timeout, env=full_env)
+        except subprocess.TimeoutExpired as exc:
+            raise DockerError(f"Tempo esgotado executando: docker {' '.join(args[:3])}") from exc
+    saida = "\n".join(p.decode("utf-8", "replace") for p in (proc.stdout, proc.stderr) if p).strip()
+    if proc.returncode != 0:
+        raise DockerError(saida[-800:] or f"docker terminou com codigo {proc.returncode}")
+    return saida
+
+
+def volume_existe(nome: str) -> bool:
+    return _run(["volume", "inspect", nome], timeout=30).returncode == 0

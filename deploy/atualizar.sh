@@ -4,15 +4,17 @@
 #   bash deploy/atualizar.sh                       # portal + solucoes novas ou com problema
 #   bash deploy/atualizar.sh --atualizar-solucoes  # tambem reconstroi as solucoes com o ultimo commit
 #   bash deploy/atualizar.sh --ip 192.168.0.50     # informa o IP em vez de detectar
+#   bash deploy/atualizar.sh --sem-backup          # pula o backup de antes (nao recomendado)
 #
 # O que faz, em ordem:
+#   0. backup de tudo (bancos, arquivos das solucoes, dados do portal); se falhar, para aqui;
 #   1. git pull do portal (para se houver arquivos alterados a mao nesta VM);
 #   2. confere o IP da VM e corrige PORTAL_URL_BASE/PORTAL_URL_PUBLICA no .env se mudou
 #      (so quando o .env usa um IP; com dominio, nao mexe);
 #   3. sobe portal + Caddy + PostgreSQL e recria o portal (carrega o codigo e o .env novos);
 #   4. instala e inicia as solucoes que faltam, reinicia as com problema e regera o Caddy.
 #      Se o IP mudou, reinicia tambem as que estao no ar. Solucoes paradas ficam paradas.
-# Pode rodar quantas vezes quiser.
+# Pode rodar quantas vezes quiser. Os bancos e volumes existentes nunca sao apagados nem recriados.
 
 set -euo pipefail
 
@@ -25,12 +27,14 @@ erro() { printf '\033[1;31m%s\033[0m\n' "$*" >&2; }
 
 IP=""
 SINC=()
+SEM_BACKUP=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --ip) IP="${2:-}"; shift 2 ;;
     --atualizar-solucoes) SINC+=(--atualizar); shift ;;
     --reiniciar-solucoes) SINC+=(--reiniciar); shift ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    --sem-backup) SEM_BACKUP=1; shift ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) erro "Opcao desconhecida: $1 (use --help)"; exit 1 ;;
   esac
 done
@@ -41,6 +45,27 @@ if [ ! -f .env ] || [ ! -f docker-compose.yml ]; then
 fi
 
 if docker info >/dev/null 2>&1; then DOCKER=(docker); else DOCKER=(sudo docker); fi
+
+# ---------- 0. backup antes de mexer em qualquer coisa ----------
+if grep -qiE '^PORTAL_BACKUP_ANTES_DE_ATUALIZAR=(nao|não|false|0|off)' .env; then SEM_BACKUP=1; fi
+if [ "$SEM_BACKUP" = 1 ]; then
+  aviso "Backup antes de atualizar: pulado."
+elif ! "${DOCKER[@]}" compose ps --status running --services 2>/dev/null | grep -qx portal; then
+  aviso "O portal nao esta rodando: sem backup antes de atualizar (nada a copiar por ele agora)."
+elif ! "${DOCKER[@]}" compose exec -T portal python -m marketplace backup --help >/dev/null 2>&1; then
+  aviso "Esta versao do portal ainda nao faz backup; o primeiro sai depois desta atualizacao (tela Backups)."
+else
+  azul "Backup antes de atualizar"
+  set +e
+  "${DOCKER[@]}" compose exec -T portal python -m marketplace backup --motivo antes-de-atualizar
+  RB=$?
+  set -e
+  if [ $RB -ne 0 ]; then
+    erro "O backup antes de atualizar falhou ou teve erros (veja acima). Nada foi atualizado."
+    erro "Resolva e rode de novo, ou atualize mesmo assim com: bash deploy/atualizar.sh --sem-backup"
+    exit 1
+  fi
+fi
 
 # ---------- 1. codigo do portal ----------
 azul "Atualizando o codigo do portal"
@@ -85,10 +110,21 @@ garantir_senha_postgres() {
 
 # ---------- 3. portal, Caddy e banco ----------
 garantir_senha_postgres
+# Pasta dos backups (fechada: tem senhas das solucoes e copias dos bancos).
+PASTA_BACKUP=$(sed -n 's/^PORTAL_BACKUP_PASTA_HOST=//p' .env | tr -d '\r' | tail -1)
+PASTA_BACKUP="${PASTA_BACKUP:-./backups}"
+mkdir -p "$PASTA_BACKUP" 2>/dev/null || sudo mkdir -p "$PASTA_BACKUP"
+chmod 700 "$PASTA_BACKUP" 2>/dev/null || sudo chmod 700 "$PASTA_BACKUP" || true
+PG_ANTES=$("${DOCKER[@]}" inspect -f '{{.Id}}' log20-postgres 2>/dev/null || true)
 azul "Subindo portal, Caddy e banco"
 "${DOCKER[@]}" compose up -d --build --quiet-pull
 # O codigo do portal e montado no container: recriar e o que carrega o codigo e o .env novos.
 "${DOCKER[@]}" compose up -d --force-recreate --no-deps portal
+PG_DEPOIS=$("${DOCKER[@]}" inspect -f '{{.Id}}' log20-postgres 2>/dev/null || true)
+if [ -n "$PG_ANTES" ] && [ "$PG_ANTES" != "$PG_DEPOIS" ]; then
+  # Os dados ficam no volume log20-postgres-dados e continuam la; so o container foi trocado.
+  aviso "O container do PostgreSQL foi recriado (configuracao dele mudou). Os dados continuam no volume log20-postgres-dados."
+fi
 
 echo "Aguardando o portal responder..."
 for _ in $(seq 1 60); do

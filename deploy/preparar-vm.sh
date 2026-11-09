@@ -107,6 +107,7 @@ fi
 
 # ---------- subir ----------
 azul "Construindo e subindo portal + Caddy (a primeira vez leva alguns minutos)"
+mkdir -p backups && chmod 700 backups
 "${DOCKER[@]}" compose up -d --build
 
 azul "Aguardando o portal responder (ate 3 minutos)"

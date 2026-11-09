@@ -234,8 +234,8 @@ usado e nem precisa estar no ar. O banco fica só na rede interna (nenhuma porta
 máquina) e a conexão não usa SSL, porque não sai do servidor.
 
 A senha do administrador do banco (`PORTAL_POSTGRES_SENHA`) é gerada pelos scripts de deploy e
-fica só no `.env`; ninguém precisa digitá-la. **Faça backup do volume `log20-postgres-dados`**:
-se a VM se perder, os bancos vão junto.
+fica só no `.env`; ninguém precisa digitá-la. O backup diário dos bancos é feito pelo portal
+(veja **Backup e restauração** abaixo).
 
 Comandos úteis, na pasta do portal:
 
@@ -253,6 +253,62 @@ ou a do usuário de uma solução, que só enxerga o próprio banco).
 
 Remover uma solução do portal não apaga o banco dela. Para apagar (irreversível):
 `sudo docker compose exec postgres psql -U postgres -c 'DROP DATABASE jornada_lideranca'`.
+
+## Backup e restauração
+
+Tela **Backups** (administradores). Por padrão, todo dia às 02:30 o portal copia:
+
+| O quê | Como |
+| --- | --- |
+| Todos os bancos do PostgreSQL do servidor, inclusive os criados à mão no pgAdmin | `pg_dump -Fc`, um arquivo por banco, conferido logo após gravar |
+| As contas do banco | `pg_dumpall --globals-only` |
+| As pastas de dados das soluções (`[execucao.volumes]`) | `.tar.gz` de cada volume |
+| Bancos externos, como o Supabase da Central | `pg_dump` da URL na configuração indicada em `[backup] banco_externo` do manifesto |
+| Os dados do portal | `portal.db` (usuários, acessos, histórico) e `dados/*.json` (configurações e senhas das soluções), mais as soluções criadas pelo assistente |
+
+O backup só lê: nada do que está em uso é parado ou alterado. Cada backup é uma pasta
+`AAAA-MM-DD_HHMMSS_<motivo>` com um `manifesto.json` (arquivos, tamanhos, sha256, erros); a pasta
+só ganha o nome final quando termina. Os arquivos ficam fechados (só root), porque têm senhas.
+
+**Tudo é configurável** na aba **Ajustes** (os padrões vêm do `.env`, em `variaveis.exemplo`):
+liga/desliga, um ou mais horários, quanto guardar (dias, semanas, meses e manuais; os fixados e o
+último backup completo nunca são apagados), o que copiar, quais soluções, espaço mínimo em disco,
+segunda cópia e um webhook (Teams/Power Automate) avisado quando um backup falha. No manifesto,
+`[backup] incluir = false` tira uma solução do backup.
+
+**Onde fica:** `backups/` na pasta do portal (fora do Git). `PORTAL_BACKUP_PASTA_HOST` no `.env`
+muda para outro disco e `PORTAL_BACKUP_COPIA_HOST` grava uma segunda cópia (ex.: pasta da rede
+montada na VM pelo `/etc/fstab`). **Sem cópia fora da VM, perder a VM é perder os backups.**
+
+**Antes de cada atualização:** `deploy/atualizar.sh` faz um backup completo antes do `git pull`; se
+ele falhar, a atualização não acontece (`--sem-backup` pula, não recomendado). A atualização nunca
+apaga nem recria os bancos ou volumes: os dados do PostgreSQL ficam no volume
+`log20-postgres-dados`. Nunca use `docker compose down -v` (o `-v` apaga os volumes).
+
+**Restaurar uma solução:** na lista, **Restaurar…**, escolha a solução e o banco e/ou os arquivos,
+e digite o identificador para confirmar. O portal faz antes um backup de segurança da solução,
+para o container, restaura o banco **num banco temporário** e só troca pelo atual se tudo deu
+certo (com erro, o atual fica intacto), restaura os arquivos e inicia de novo se estava no ar.
+**Conferir** faz uma restauração de teste de cada banco num banco temporário e confere o sha256 de
+cada arquivo, sem tocar no que está em uso; vale fazer de vez em quando.
+
+Pelo terminal, na pasta do portal:
+
+```bash
+sudo docker compose exec portal python -m marketplace backups                         # lista
+sudo docker compose exec portal python -m marketplace backup                          # backup agora
+sudo docker compose exec portal python -m marketplace verificar-backup <nome>         # restauração de teste
+sudo docker compose exec portal python -m marketplace restaurar <nome> --solucao orcamento-obz
+sudo docker compose exec portal python -m marketplace restaurar <nome> --portal       # usuários, acessos, senhas
+```
+
+**VM nova (recuperar tudo):** instale o portal com `deploy/preparar-vm.sh`, copie a pasta do
+backup para `backups/` e rode
+`sudo docker compose exec portal python -m marketplace restaurar <nome> --tudo`. Ele volta os dados
+do portal, recria as contas do banco (com as mesmas senhas; o administrador `postgres` fica com a
+senha do `.env` da VM nova), os bancos e os arquivos de cada solução. Depois:
+`sudo docker compose restart portal` e `bash deploy/atualizar.sh`. Bancos externos (Supabase) não
+são restaurados automaticamente: o `.dump` em `externos/` serve para `pg_restore` manual.
 
 ## Publicar uma nova solução pelo assistente
 

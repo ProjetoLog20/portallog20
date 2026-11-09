@@ -3,7 +3,7 @@
 /* =========================================================================
    Portal de Soluções LOG20 — interface (sem frameworks)
    Rotas: #/  #/login  #/senha  #/admin/solucoes  #/admin/solucao/<id>
-          #/admin/usuarios  #/admin/acessos
+          #/admin/usuarios  #/admin/acessos  #/admin/backups
    ========================================================================= */
 
 const ROTULOS = {
@@ -232,7 +232,8 @@ function montarTopo() {
       menu.append(h("span", { class: "menu-divisa", "aria-hidden": "true" }),
         item("#/admin/solucoes", "Soluções", rota.startsWith("#/admin/solucao") || rota === "#/admin/nova-solucao" || rota.startsWith("#/admin/editar-solucao/")),
         item("#/admin/usuarios", "Usuários", rota === "#/admin/usuarios"),
-        item("#/admin/acessos", "Acessos", rota === "#/admin/acessos"));
+        item("#/admin/acessos", "Acessos", rota === "#/admin/acessos"),
+        item("#/admin/backups", "Backups", rota === "#/admin/backups"));
     }
   }
   const sair = async () => { await api("/api/auth/logout", { method: "POST" }).catch(() => {}); eu = null; location.hash = "#/login"; };
@@ -1681,6 +1682,313 @@ function pintarCriada(alvo, r, dados) {
   alvo.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+/* ================= admin: backups ================= */
+
+const estadoBackups = { aba: "lista", dados: null, logAberto: false };
+const MOTIVOS_BACKUP = {
+  agendado: "Automático", manual: "Manual", "antes-de-atualizar": "Antes de atualizar o portal",
+  "antes-de-restaurar": "Segurança, antes de restaurar",
+};
+
+function tamanho(bytes) {
+  let n = Number(bytes) || 0;
+  for (const u of ["B", "KB", "MB", "GB"]) {
+    if (n < 1024 || u === "GB") return u === "B" ? `${n} B` : `${n.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ${u}`;
+    n /= 1024;
+  }
+  return "";
+}
+function dataIso(iso, curto) { return iso ? quando(Date.parse(iso) / 1000, curto) : "Nunca"; }
+
+function rotuloItem(it, nomes) {
+  const sol = it.solucao ? nomes.get(it.solucao) || it.solucao : null;
+  if (it.tipo === "portal") return it.arquivo.endsWith("portal.db") ? "Portal: usuários, acessos e histórico" : "Portal: configurações e segredos";
+  if (it.tipo === "contas") return "Contas do banco do servidor";
+  if (it.tipo === "banco") return `Banco ${it.banco}${sol ? ` (${sol})` : " (sem solução: criado à mão)"}`;
+  if (it.tipo === "volume") return `Arquivos de ${sol}: ${it.chave}`;
+  if (it.tipo === "externo") return `Banco externo de ${sol} (${it.servidor})`;
+  return it.arquivo;
+}
+
+async function telaBackups() {
+  document.title = "Backups · Portal de Soluções LOG20";
+  estadoBackups.dados = await api("/api/backups");
+  const abas = [["lista", "Backups"], ["ajustes", "Ajustes"]];
+  $conteudo.replaceChildren(
+    h("section", { class: "intro intro-linha" },
+      h("div", {}, h("h1", {}, "Backups"),
+        h("p", {}, "Cópias dos bancos das soluções, das pastas de dados e dos dados do portal. O backup só lê: nada do que está em uso é alterado.")),
+      h("div", { class: "intro-lado" }, h("button", { type: "button", class: "botao primario", id: "backup-agora", onclick: fazerBackupAgora }, "Fazer backup agora"))),
+    h("div", { id: "backup-alerta" }),
+    h("div", { class: "grade-backup", id: "backup-resumo" }),
+    h("div", { id: "backup-tarefa" }),
+    h("div", { class: "abas", role: "tablist" }, abas.map(([k, rotulo]) =>
+      h("button", { type: "button", role: "tab", "aria-selected": String(estadoBackups.aba === k),
+        onclick: () => { estadoBackups.aba = k; telaBackups(); } }, rotulo))),
+    h("div", { id: "backup-corpo" }));
+  pintarResumoBackup();
+  if (estadoBackups.aba === "ajustes") pintarAjustesBackup();
+  else pintarListaBackups();
+}
+
+async function atualizarBackups() {
+  const antes = estadoBackups.dados;
+  estadoBackups.dados = await api("/api/backups");
+  pintarResumoBackup();
+  const mudouLista = JSON.stringify(antes?.backups) !== JSON.stringify(estadoBackups.dados.backups);
+  if (estadoBackups.aba === "lista" && mudouLista) pintarListaBackups();
+}
+
+function pintarResumoBackup() {
+  const d = estadoBackups.dados;
+  const e = d.estado || {};
+  const t = d.tarefa;
+  emAndamento = t?.estado === "executando";
+  const botao = document.getElementById("backup-agora");
+  if (botao) botao.disabled = emAndamento;
+
+  // Alerta: último falhou, ou nenhum backup bom nas últimas 48 h.
+  const alerta = document.getElementById("backup-alerta");
+  const ultimoBom = e.ultimo_sucesso_em ? Date.parse(e.ultimo_sucesso_em) : 0;
+  const msgs = [];
+  if (e.ultimo && !e.ultimo_ok) msgs.push(h("li", {}, `O último backup (${dataIso(e.ultimo_em)}) teve erros: ${(e.ultimo_erros || []).join("; ")}`));
+  if (e.ultimo_erro && (!e.ultimo_em || Date.parse(e.ultimo_erro_em) > Date.parse(e.ultimo_em))) msgs.push(h("li", {}, e.ultimo_erro));
+  if (d.ajustes.ativo && (!ultimoBom || Date.now() - ultimoBom > 48 * 3600e3)) msgs.push(h("li", {}, ultimoBom ? `Nenhum backup completo desde ${dataIso(e.ultimo_sucesso_em)}.` : "Ainda não há nenhum backup completo deste servidor."));
+  if (!d.ajustes.ativo) msgs.push(h("li", {}, "O backup automático está desligado (Ajustes)."));
+  if (!d.disco.ok) msgs.push(h("li", {}, `A pasta de backup não pode ser usada: ${d.disco.erro}`));
+  alerta.replaceChildren(msgs.length ? h("div", { class: "aviso" }, h("strong", {}, "Atenção"), h("ul", {}, msgs)) : null);
+
+  const cartao = (rotulo, valor, detalhe, extra, caminho) => h("div", { class: "cartao-backup" },
+    h("span", { class: "deteccao-rotulo" }, rotulo), h("strong", {}, valor), detalhe ? h("small", {}, detalhe) : null,
+    caminho ? h("small", { class: "caminho", title: caminho }, caminho) : null, extra || null);
+  const ultimo = d.backups.find((b) => !b.parcial);
+  const copia = d.copia
+    ? cartao("Segunda cópia", d.ajustes.copiar ? "Ligada" : "Desligada", "Pasta:", null, d.copia)
+    : cartao("Segunda cópia", "Não configurada", "Uma cópia em outro disco ou na rede protege contra perder a VM. Veja Ajustes.");
+  document.getElementById("backup-resumo").replaceChildren(
+    cartao("Último backup", ultimo ? dataIso(ultimo.criado_em) : "Nenhum",
+      ultimo ? `${MOTIVOS_BACKUP[ultimo.motivo] || ultimo.motivo} · ${tamanho(ultimo.bytes)}` : "Clique em Fazer backup agora.",
+      ultimo ? pilula(ultimo.ok ? "rodando" : "com_problema", ultimo.ok ? "Completo" : "Com erros") : null),
+    cartao("Próximo automático", d.proximo ? dataIso(d.proximo) : "Desligado",
+      d.ajustes.ativo ? `Todo dia às ${d.ajustes.horarios.join(" e ")}` : "Ligue em Ajustes."),
+    cartao("Espaço livre", d.disco.ok ? d.disco.livre_texto : "—", `de ${d.disco.total_texto}, na pasta:`, null, d.pasta),
+    copia);
+
+  const alvo = document.getElementById("backup-tarefa");
+  if (!t) { alvo.replaceChildren(); return; }
+  const rotuloEstado = { executando: ["ocupado", t.etapa || "Em andamento"], concluida: ["rodando", "Concluída"], falhou: ["com_problema", "Falhou"] }[t.estado];
+  let pre = alvo.querySelector("pre");
+  if (!pre) {
+    pre = h("pre", { class: "saida curta", tabindex: "0" });
+    alvo.replaceChildren(h("section", { class: "painel tarefa-backup" },
+      h("div", { class: "linha-titulo" }, h("h2", {}, ""), h("span", { class: "tarefa-estado" })),
+      h("details", { open: emAndamento || estadoBackups.logAberto, ontoggle: (ev) => { estadoBackups.logAberto = ev.target.open; } },
+        h("summary", {}, "Ver o registro"), pre),
+      h("p", { class: "texto-erro", hidden: true })));
+  }
+  const painel = alvo.querySelector(".painel");
+  painel.querySelector("h2").textContent = `Operação: ${t.acao}`;
+  painel.querySelector(".tarefa-estado").replaceChildren(pilula(rotuloEstado[0], rotuloEstado[1]));
+  const erro = painel.querySelector(".texto-erro");
+  erro.hidden = !t.erro; erro.textContent = t.erro || "";
+  const noFim = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+  if (pre.textContent !== t.log) { pre.textContent = t.log; if (noFim) pre.scrollTop = pre.scrollHeight; }
+}
+
+async function fazerBackupAgora() {
+  try {
+    await api("/api/backups", { method: "POST" });
+    estadoBackups.logAberto = true;
+    toast("Backup iniciado.");
+    await atualizarBackups();
+  } catch (e) { toast(e.message, "erro"); }
+}
+
+function pintarListaBackups() {
+  const d = estadoBackups.dados;
+  const alvo = document.getElementById("backup-corpo");
+  const nomes = new Map(d.solucoes.map((s) => [s.id, s.nome]));
+  if (!d.backups.length) {
+    alvo.replaceChildren(h("div", { class: "vazio" }, h("strong", {}, "Nenhum backup ainda"),
+      h("p", {}, d.ajustes.ativo ? `O primeiro automático sai ${dataIso(d.proximo).toLowerCase()}. Ou clique em Fazer backup agora.` : "Clique em Fazer backup agora.")));
+    return;
+  }
+  const linhas = d.backups.map((b) => {
+    const verif = b.verificacao;
+    const situacao = !b.ok ? pilula("com_problema", "Com erros")
+      : verif ? pilula(verif.ok ? "rodando" : "com_problema", verif.ok ? "Conferido" : "Problema na conferência")
+      : pilula("instalado", "Completo");
+    const restauraveis = [...new Set(b.itens.filter((i) => i.solucao && (i.tipo === "banco" || i.tipo === "volume")).map((i) => i.solucao))]
+      .filter((sid) => nomes.has(sid));
+    return h("tr", { class: b.ok ? "" : "linha-erro" },
+      h("td", {}, h("strong", {}, dataIso(b.criado_em)), h("div", { class: "sub" }, MOTIVOS_BACKUP[b.motivo] || b.motivo,
+        b.fixado ? h("span", { class: "etiqueta" }, "Fixado") : null)),
+      h("td", {}, h("details", { class: "itens-backup" },
+        h("summary", {}, `${plural(b.itens.length, "arquivo", "arquivos")} · ${tamanho(b.bytes)}`),
+        h("ul", {}, b.itens.map((i) => h("li", {}, rotuloItem(i, nomes),
+          h("small", {}, ` ${tamanho(i.bytes)}${i.tabelas != null ? ` · ${plural(i.tabelas, "tabela", "tabelas")}` : ""}${i.arquivos != null ? ` · ${plural(i.arquivos, "arquivo", "arquivos")}` : ""}`)))),
+        b.erros.length ? h("ul", { class: "erros-backup" }, b.erros.map((e) => h("li", {}, e))) : null,
+        verif && !verif.ok ? h("ul", { class: "erros-backup" }, verif.problemas.map((e) => h("li", {}, e))) : null)),
+      h("td", {}, situacao, verif ? h("div", { class: "sub" }, `Conferido ${dataIso(verif.em, true).toLowerCase()}`) : null),
+      h("td", { class: "acoes-backup" },
+        restauraveis.length ? h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoRestaurar(b, restauraveis, nomes) }, "Restaurar…") : null,
+        h("button", { type: "button", class: "botao pequeno sutil", title: "Restaura cada banco num banco de teste e confere os arquivos, sem mexer no que está em uso",
+          onclick: () => acaoBackup(`/api/backups/${b.nome}/verificar`, "POST", null, "Conferência iniciada.") }, "Conferir"),
+        h("button", { type: "button", class: "botao pequeno sutil", title: b.fixado ? "Volta a seguir a limpeza automática" : "Nunca é apagado pela limpeza automática",
+          onclick: () => acaoBackup(`/api/backups/${b.nome}/fixar`, "PUT", { fixado: !b.fixado }, b.fixado ? "Backup desfixado." : "Backup fixado: não será apagado.") }, b.fixado ? "Desfixar" : "Fixar"),
+        b.fixado ? null : h("button", { type: "button", class: "link-limpar", onclick: async () => {
+          if (!(await confirmar({ titulo: "Apagar este backup?", texto: `${dataIso(b.criado_em)} (${tamanho(b.bytes)}). Não dá para desfazer.`, botao: "Apagar backup", perigo: true }))) return;
+          acaoBackup(`/api/backups/${b.nome}`, "DELETE", null, "Backup apagado.");
+        } }, "Apagar")));
+  });
+  const aj = d.ajustes;
+  alvo.replaceChildren(
+    h("div", { class: "tabela-rolagem" }, h("table", { class: "tabela-simples tabela-backups" },
+      h("thead", {}, h("tr", {}, ["Quando", "Conteúdo", "Situação", ""].map((x) => h("th", {}, x)))),
+      h("tbody", {}, linhas))),
+    h("p", { class: "nota" }, `Guardados: os automáticos dos últimos ${plural(aj.manter_diarios, "dia", "dias")}, um por semana nas últimas ${aj.manter_semanais}, um por mês nos últimos ${aj.manter_mensais} e os ${aj.manter_avulsos} manuais mais recentes. Os fixados nunca são apagados.`));
+}
+
+async function acaoBackup(url, method, body, ok) {
+  try {
+    await api(url, { method, body: body || undefined });
+    toast(ok);
+    if (method !== "POST") estadoBackups.dados = null;
+    await atualizarBackups();
+    if (method !== "POST") pintarListaBackups();
+  } catch (e) { toast(e.message, "erro"); }
+}
+
+function dialogoRestaurar(b, restauraveis, nomes) {
+  const sel = h("select", { id: "rest-sol" }, restauraveis.map((sid) => h("option", { value: sid }, nomes.get(sid))));
+  const partes = h("div", { class: "rest-partes" });
+  const confirmacao = h("input", { type: "text", id: "rest-conf", autocomplete: "off", spellcheck: false });
+  const rotuloConf = h("label", { for: "rest-conf" });
+  const botao = h("button", { type: "submit", class: "botao perigo-cheio", form: "form-restaurar", disabled: true }, "Restaurar");
+  const pintar = () => {
+    const sid = sel.value;
+    const itens = b.itens.filter((i) => i.solucao === sid);
+    const banco = itens.find((i) => i.tipo === "banco");
+    const vols = itens.filter((i) => i.tipo === "volume");
+    partes.replaceChildren(
+      banco ? h("label", { class: "campo-check" }, h("input", { type: "checkbox", name: "banco", checked: true }),
+        h("span", {}, h("strong", {}, "Banco de dados"), h("small", {}, ` ${banco.banco}${banco.tabelas != null ? `, ${plural(banco.tabelas, "tabela", "tabelas")}` : ""}, ${tamanho(banco.bytes)}`))) : null,
+      vols.length ? h("label", { class: "campo-check" }, h("input", { type: "checkbox", name: "arquivos", checked: true }),
+        h("span", {}, h("strong", {}, "Arquivos"), h("small", {}, ` ${vols.map((v) => v.chave).join(", ")}, ${tamanho(vols.reduce((s, v) => s + v.bytes, 0))}`))) : null);
+    rotuloConf.textContent = `Para confirmar, digite ${sid}`;
+    confirmacao.value = "";
+    botao.disabled = true;
+  };
+  sel.addEventListener("change", pintar);
+  confirmacao.addEventListener("input", () => { botao.disabled = confirmacao.value.trim() !== sel.value; });
+  pintar();
+  const form = h("form", { id: "form-restaurar", class: "config" },
+    h("div", { class: "campo" }, h("label", { for: "rest-sol" }, "Solução"), sel),
+    h("div", { class: "campo" }, h("label", {}, "O que voltar"), partes),
+    h("ul", { class: "lista-explica" },
+      h("li", {}, "Antes, o portal faz um backup de segurança desta solução (aparece na lista)."),
+      h("li", {}, "A solução é parada; se estava no ar, volta sozinha no fim."),
+      h("li", {}, "O banco é restaurado numa cópia e só substitui o atual se tudo der certo."),
+      h("li", {}, h("strong", {}, "Tudo o que foi gravado depois deste backup se perde."))),
+    h("div", { class: "campo" }, rotuloConf, confirmacao));
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const banco = !!form.querySelector("[name=banco]")?.checked;
+    const arquivos = !!form.querySelector("[name=arquivos]")?.checked;
+    if (!banco && !arquivos) { toast("Marque o banco, os arquivos ou os dois.", "erro"); return; }
+    botao.disabled = true;
+    try {
+      await api(`/api/backups/${b.nome}/restaurar`, { method: "POST", body: { solucao: sel.value, banco, arquivos, confirmacao: confirmacao.value.trim() } });
+      dlg.close();
+      estadoBackups.logAberto = true;
+      toast("Restauração iniciada. Acompanhe o registro.");
+      await atualizarBackups();
+    } catch (e) { toast(e.message, "erro"); botao.disabled = false; }
+  });
+  const dlg = dialogo({
+    titulo: "Restaurar dados de uma solução",
+    descricao: `Backup de ${dataIso(b.criado_em)}`,
+    corpo: form,
+    rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), botao],
+  });
+}
+
+function pintarAjustesBackup() {
+  const d = estadoBackups.dados;
+  const aj = d.ajustes;
+  const alvo = document.getElementById("backup-corpo");
+  const check = (nome, rotulo, ajuda, extra = {}) => h("label", { class: "campo-check" },
+    h("input", { type: "checkbox", name: nome, checked: !!aj[nome], ...extra }),
+    h("span", {}, h("strong", {}, rotulo), ajuda ? h("small", {}, ` ${ajuda}`) : null));
+  const numero = (nome, rotulo, ajuda, extra = {}) => h("div", { class: "campo" },
+    h("label", { for: `aj-${nome}` }, rotulo),
+    h("input", { type: "number", id: `aj-${nome}`, name: nome, value: aj[nome], min: 0, max: 3650, ...extra }),
+    ajuda ? h("small", {}, ajuda) : null);
+  const descreve = (s) => [s.banco ? "banco do servidor" : null, s.volumes.length ? `arquivos (${s.volumes.join(", ")})` : null,
+    s.externo ? `banco externo (${s.externo})` : null].filter(Boolean).join(", ") || "nada para copiar";
+  const solucoes = d.solucoes.map((s) => h("label", { class: "campo-check" },
+    h("input", { type: "checkbox", name: "sol", value: s.id, checked: s.manifesto_inclui && !aj.excluir.includes(s.id), disabled: !s.manifesto_inclui }),
+    h("span", {}, h("strong", {}, s.nome), h("small", {}, ` ${s.manifesto_inclui ? descreve(s) : "fora do backup pelo manifesto ([backup] incluir = false)"}`))));
+
+  const form = h("form", { class: "config ajustes-backup" },
+    h("section", { class: "painel" }, h("h2", {}, "Quando"),
+      check("ativo", "Backup automático ligado", "Roda dentro do portal, todo dia, nos horários abaixo."),
+      h("div", { class: "campo" }, h("label", { for: "aj-horarios" }, "Horários"),
+        h("input", { type: "text", id: "aj-horarios", name: "horarios", value: aj.horarios.join(", "), placeholder: "02:30" }),
+        h("small", {}, `Um ou mais, separados por vírgula (ex.: 02:30, 13:00). Horário de Brasília. Se a VM estiver desligada no horário, o backup sai quando ela voltar (até 12 horas depois). Além destes, o portal faz um backup antes de cada atualização (deploy/atualizar.sh).`))),
+    h("section", { class: "painel" }, h("h2", {}, "Quanto tempo guardar"),
+      h("div", { class: "form-grade quatro" },
+        numero("manter_diarios", "Dias", "Todos os automáticos destes últimos dias.", { min: 1 }),
+        numero("manter_semanais", "Semanas", "Um por semana."),
+        numero("manter_mensais", "Meses", "Um por mês."),
+        numero("manter_avulsos", "Manuais", "Os mais recentes: manuais, antes de atualizar e de segurança.")),
+      h("p", { class: "nota" }, "O último backup completo nunca é apagado, e os fixados também não.")),
+    h("section", { class: "painel" }, h("h2", {}, "O que copiar"),
+      check("incluir_bancos", "Bancos do PostgreSQL do servidor", d.postgres ? "Todos, inclusive os criados à mão no pgAdmin." : "Este servidor não tem o PostgreSQL do portal.", { disabled: !d.postgres }),
+      check("incluir_volumes", "Arquivos das soluções", "As pastas de dados (volumes) de cada solução, como planilhas importadas e uploads."),
+      check("incluir_externos", "Bancos externos", "O banco de uma solução fora do servidor (ex.: Supabase), quando o manifesto indica em [backup] banco_externo."),
+      check("incluir_portal", "Dados do portal", "Usuários, acessos, histórico, configurações e senhas das soluções."),
+      h("h3", { class: "topo-16" }, "Soluções"),
+      h("div", { class: "lista-checks" }, solucoes)),
+    h("section", { class: "painel" }, h("h2", {}, "Segurança"),
+      check("verificar", "Conferir cada banco ao copiar", "Lê o índice de cada cópia de banco logo depois de gravar, para garantir que o arquivo está inteiro."),
+      numero("espaco_minimo_gb", "Espaço livre mínimo (GB)", "Abaixo disso o backup não roda e o aviso aparece aqui.", { step: "0.5", max: 10000 }),
+      check("copiar", "Gravar uma segunda cópia", d.copia ? `Em ${d.copia}.` : "Indisponível: defina PORTAL_BACKUP_COPIA_HOST no .env do servidor (ex.: uma pasta de rede montada na VM) e rode deploy/atualizar.sh.", { disabled: !d.copia }),
+      h("div", { class: "campo" }, h("label", { for: "aj-webhook" }, "Avisar quando falhar (opcional)"),
+        h("input", { type: "url", id: "aj-webhook", name: "aviso_webhook", value: aj.aviso_webhook, placeholder: "https://…" }),
+        h("small", {}, "Endereço de webhook (ex.: um fluxo do Teams ou do Power Automate) que recebe { \"text\": \"…\" } quando um backup falha."))),
+    h("div", { class: "linha-botoes" },
+      h("button", { type: "submit", class: "botao primario" }, "Salvar ajustes"),
+      d.personalizado ? h("button", { type: "button", class: "botao sutil", onclick: async () => {
+        if (!(await confirmar({ titulo: "Voltar aos padrões?", texto: "Os ajustes voltam aos valores do servidor (.env). Os backups existentes não mudam.", botao: "Voltar aos padrões" }))) return;
+        try { await api("/api/backups/ajustes", { method: "PUT", body: { ajustes: null } }); toast("Ajustes voltaram ao padrão."); await telaBackups(); }
+        catch (e) { toast(e.message, "erro"); }
+      } }, "Voltar aos padrões do servidor") : null));
+
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const val = (n) => form.elements[n];
+    const ajustes = {
+      ativo: val("ativo").checked, horarios: val("horarios").value,
+      manter_diarios: Number(val("manter_diarios").value), manter_semanais: Number(val("manter_semanais").value),
+      manter_mensais: Number(val("manter_mensais").value), manter_avulsos: Number(val("manter_avulsos").value),
+      incluir_bancos: val("incluir_bancos").checked, incluir_volumes: val("incluir_volumes").checked,
+      incluir_externos: val("incluir_externos").checked, incluir_portal: val("incluir_portal").checked,
+      verificar: val("verificar").checked, espaco_minimo_gb: val("espaco_minimo_gb").value,
+      copiar: val("copiar").checked, aviso_webhook: val("aviso_webhook").value.trim(),
+      excluir: d.solucoes.filter((s) => s.manifesto_inclui && !form.querySelector(`[name=sol][value="${s.id}"]`).checked).map((s) => s.id),
+    };
+    try {
+      await api("/api/backups/ajustes", { method: "PUT", body: { ajustes } });
+      toast("Ajustes salvos.");
+      estadoBackups.dados = await api("/api/backups");
+      pintarResumoBackup();
+      pintarAjustesBackup();
+    } catch (e) { toast(e.message, "erro"); }
+  });
+  alvo.replaceChildren(form);
+}
+
 /* ================= navegação ================= */
 
 async function atualizar() {
@@ -1693,6 +2001,8 @@ async function atualizar() {
       await atualizarSolucoes();
     } else if (rota === "#/") {
       await telaMeusSistemas();
+    } else if (rota === "#/admin/backups") {
+      await atualizarBackups();
     }
   } catch { /* tenta de novo no próximo ciclo */ }
 }
@@ -1771,6 +2081,7 @@ async function navegar() {
     else if (rota === "#/admin/acessos") await telaAcessos();
     else if (rota === "#/admin/nova-solucao") telaNovaSolucao();
     else if (rota.startsWith("#/admin/editar-solucao/")) await telaEditarSolucao(rota.split("/")[3]);
+    else if (rota === "#/admin/backups") { await telaBackups(); novoRitmo = [2000, 30000]; }
     else { rota = "#/"; await telaMeusSistemas(); novoRitmo = [60000, 60000]; }
   } catch (e) {
     if (e.status === 401 || location.hash.split("?")[0] !== rota) return;

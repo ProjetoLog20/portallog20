@@ -75,7 +75,23 @@ soluções (inclusive as que entraram no catálogo depois). Com `--atualizar-sol
 reconstrói as soluções com o último código. Uma solução nova precisa estar no token de leitura
 da VM (peça ao dono dos repositórios).
 
+Antes de mexer em qualquer coisa, o script faz um **backup completo** (bancos, arquivos das
+soluções e dados do portal); se o backup falhar, nada é atualizado. Os bancos e volumes que já
+existem nunca são apagados nem recriados pela atualização.
+
 Para atualizar só **uma solução**: no portal, botão **Atualizar**.
+
+## Backup
+
+O portal faz backup sozinho todo dia (tela **Backups**, onde também se restaura). Os arquivos
+ficam em `backups/` dentro da pasta do portal. Para guardar uma cópia fora da VM (recomendado),
+monte uma pasta da rede na VM e coloque no `.env`:
+
+```bash
+PORTAL_BACKUP_COPIA_HOST=/mnt/rede/backups-portal
+```
+
+e rode `bash deploy/atualizar.sh`. Detalhes no README, em **Backup e restauração**.
 
 ## Problemas comuns
 

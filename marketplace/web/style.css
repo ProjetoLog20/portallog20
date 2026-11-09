@@ -429,7 +429,7 @@ a.tile:hover .tile-nome { color: var(--link); }
 /* ===================== formulários ===================== */
 .campo label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
 .campo small { display: block; color: var(--suave); font-size: 12.5px; margin-top: 5px; }
-.campo input[type="text"], .campo input[type="password"], .campo input[type="number"], .campo select, .campo textarea {
+.campo input[type="text"], .campo input[type="password"], .campo input[type="number"], .campo input[type="url"], .campo select, .campo textarea {
   width: 100%; min-height: 42px; padding: 9px 12px;
   border: 1px solid var(--linha-forte); border-radius: var(--raio-p);
   background: var(--superficie); color: var(--texto); font: inherit;
@@ -709,3 +709,52 @@ body:has(.barra-selecao:not([hidden])) .toast { bottom: 92px; }
 .topo-ajuste { margin: -6px 0 14px; font-size: 14px; }
 #ns-reanalise { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
 #ns-reanalise:empty { display: none; }
+
+/* ---------- backups ---------- */
+.grade-backup { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.cartao-backup {
+  display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; min-width: 0;
+  background: var(--superficie); border: 1px solid var(--linha); border-radius: var(--raio);
+}
+.cartao-backup strong { font: 600 17px/1.25 var(--titulo); }
+.cartao-backup small { color: var(--suave); font-size: 12.5px; overflow-wrap: anywhere; }
+.cartao-backup .pilula { align-self: flex-start; margin-top: 4px; }
+.tarefa-backup .linha-titulo { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.tarefa-backup h2 { margin: 0; }
+.tarefa-backup summary, .itens-backup summary { cursor: pointer; font-size: 13.5px; color: var(--link); }
+.tarefa-backup .texto-erro { margin: 10px 0 0; }
+#backup-tarefa:empty { display: none; }
+#backup-tarefa { margin-bottom: 18px; }
+.tabela-backups td { vertical-align: top; }
+.tabela-backups .sub { color: var(--suave); font-size: 12.5px; margin-top: 2px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.itens-backup ul { margin: 8px 0 0; padding-left: 18px; font-size: 13.5px; }
+.itens-backup li { margin: 3px 0; }
+.itens-backup small { color: var(--suave); }
+.erros-backup li { color: var(--erro); }
+.acoes-backup { white-space: nowrap; text-align: right; }
+.acoes-backup .botao { margin-left: 4px; }
+.acoes-backup .link-limpar { margin-left: 8px; }
+.rest-partes { display: flex; flex-direction: column; gap: 8px; }
+.lista-explica { margin: 0 0 16px; padding-left: 18px; font-size: 14px; line-height: 1.5; }
+.ajustes-backup { display: flex; flex-direction: column; gap: 16px; max-width: 860px; }
+.ajustes-backup .painel { margin: 0; }
+.ajustes-backup .campo-check { margin-bottom: 10px; }
+.form-grade.quatro { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.lista-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 4px 16px; }
+@media (max-width: 720px) {
+  .form-grade.quatro { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .acoes-backup { white-space: normal; text-align: left; }
+  .acoes-backup .botao { margin: 4px 4px 0 0; }
+}
+/* Caixa + texto de duas linhas (strong + small dentro de um span): a caixa fica ao lado do texto. */
+.campo-check:has(> span) { flex-wrap: nowrap; align-items: flex-start; }
+.campo-check:has(> span) > input { margin-top: 2px; flex: none; }
+.campo-check > span small { padding-left: 0; }
+.cartao-backup small.caminho { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.campo label.campo-check { display: flex; margin-bottom: 0; font-weight: 400; }
+@media (max-width: 720px) {
+  .tabela-backups thead { display: none; }
+  .tabela-backups, .tabela-backups tbody, .tabela-backups tr, .tabela-backups td { display: block; width: 100%; }
+  .tabela-backups tr { padding: 12px 0; border-bottom: 1px solid var(--linha); }
+  .tabela-backups td { border: 0 !important; padding: 4px 0 !important; }
+}

@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config as config_mod
 from . import assistente, docker_cli, proxy
+from .backup import Backups, ErroBackup, formatar_tamanho, resumo
 from .auth import Autenticacao, ErroAuth, ErroLote, Usuario
 from .catalog import Solucao, carregar_catalogo
 from .manager import ACOES, Armazenamento, Gerenciador
@@ -64,6 +65,15 @@ _carregar()
 
 def ger() -> Gerenciador:
     return _estado["gerenciador"]
+
+
+# Backup diario e restauracao (tela Backups). O agendador roda dentro do portal.
+BACKUPS = Backups(CFG, ger)
+
+
+@app.on_event("startup")
+def _iniciar_agendador() -> None:
+    BACKUPS.iniciar_agendador()
 
 
 # ---------------- protecoes gerais ----------------
@@ -695,3 +705,126 @@ def api_acessos(
 @app.get("/api/historico")
 def api_historico(limite: int = 200, _: Usuario = Depends(exigir_admin)) -> dict:
     return {"eventos": AUTH.historico(limite)}
+
+
+# ---------------- backups ----------------
+
+def _tarefa_backup() -> dict | None:
+    t = BACKUPS.tarefa
+    if t is None:
+        return None
+    return {"acao": t.acao, "estado": t.estado, "etapa": t.etapa, "erro": t.erro, "inicio": t.inicio,
+            "fim": t.fim, "log": "\n".join(t.log)}
+
+
+@app.get("/api/backups")
+def api_backups(_: Usuario = Depends(exigir_admin)) -> dict:
+    from dataclasses import asdict
+
+    proximo = BACKUPS.proximo()
+    disco = BACKUPS.disco()
+    solucoes = []
+    for sol in sorted(ger().solucoes.values(), key=lambda s: s.nome.lower()):
+        solucoes.append({"id": sol.id, "nome": sol.nome, "banco": bool(sol.banco), "volumes": list(sol.volumes),
+                         "externo": sol.backup_externo, "manifesto_inclui": sol.backup_incluir})
+    return {
+        "pasta": str(BACKUPS.pasta),
+        "copia": str(CFG.backup_copia) if CFG.backup_copia else None,
+        "postgres": bool(CFG.postgres_container),
+        "disco": {**disco, "livre_texto": formatar_tamanho(disco.get("livre", 0)),
+                  "total_texto": formatar_tamanho(disco.get("total", 0))},
+        "ajustes": asdict(BACKUPS.ajustes()),
+        "padroes": asdict(BACKUPS.padroes()),
+        "personalizado": BACKUPS.personalizado(),
+        "estado": BACKUPS.estado(),
+        "proximo": proximo.isoformat(timespec="minutes") if proximo else None,
+        "tarefa": _tarefa_backup(),
+        "backups": [resumo(m) for m in BACKUPS.listar()],
+        "solucoes": solucoes,
+    }
+
+
+@app.put("/api/backups/ajustes")
+def api_backups_ajustes(ajustes: dict | None = Body(None, embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
+    from dataclasses import asdict
+
+    try:
+        aj = BACKUPS.salvar_ajustes(ajustes)
+    except (ErroBackup, ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    AUTH.registrar(autor, "Alterou os ajustes de backup" if ajustes is not None else "Voltou os ajustes de backup ao padrao")
+    return {"ok": True, "ajustes": asdict(aj)}
+
+
+@app.post("/api/backups")
+def api_backup_agora(autor: Usuario = Depends(exigir_admin)) -> dict:
+    try:
+        BACKUPS.em_segundo_plano("backup manual", lambda tarefa: BACKUPS._rodar_backup(tarefa, "manual"))
+    except ErroBackup as exc:
+        raise HTTPException(409, str(exc)) from exc
+    AUTH.registrar(autor, "Fez backup manual")
+    return {"ok": True}
+
+
+@app.post("/api/backups/{nome}/verificar")
+def api_backup_verificar(nome: str, _: Usuario = Depends(exigir_admin)) -> dict:
+    try:
+        BACKUPS.obter(nome)
+
+        def rodar(tarefa) -> None:
+            tarefa.etapa = "Conferindo"
+            r = BACKUPS.verificar(nome, tarefa.registrar)
+            if not r["ok"]:
+                tarefa.erro = "; ".join(r["problemas"])[:500]
+
+        BACKUPS.em_segundo_plano(f"verificar {nome}", rodar)
+    except ErroBackup as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"ok": True}
+
+
+@app.post("/api/backups/{nome}/restaurar")
+def api_backup_restaurar(nome: str, solucao: str = Body(..., embed=True), banco: bool = Body(True, embed=True),
+                         arquivos: bool = Body(True, embed=True), confirmacao: str = Body("", embed=True),
+                         autor: Usuario = Depends(exigir_admin)) -> dict:
+    if confirmacao.strip() != solucao:
+        raise HTTPException(400, "Digite o identificador da solucao para confirmar.")
+    if not banco and not arquivos:
+        raise HTTPException(400, "Escolha o banco, os arquivos ou os dois.")
+    _solucao(solucao)
+    t = ger().tarefas.get(solucao)
+    if t and t.estado == "executando":
+        raise HTTPException(409, f"A solucao tem uma operacao em andamento: {t.acao}")
+    try:
+        BACKUPS.obter(nome)
+
+        def rodar(tarefa) -> None:
+            tarefa.etapa = f"Restaurando {solucao}"
+            BACKUPS.restaurar_solucao(nome, solucao, banco=banco, arquivos=arquivos, registrar=tarefa.registrar)
+
+        BACKUPS.em_segundo_plano(f"restaurar {solucao}", rodar)
+    except ErroBackup as exc:
+        raise HTTPException(409, str(exc)) from exc
+    partes = " e ".join(p for p, ok in (("banco", banco), ("arquivos", arquivos)) if ok)
+    AUTH.registrar(autor, "Restaurou backup", f"{solucao} ({partes}) a partir de {nome}")
+    return {"ok": True}
+
+
+@app.put("/api/backups/{nome}/fixar")
+def api_backup_fixar(nome: str, fixado: bool = Body(..., embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
+    try:
+        BACKUPS.fixar(nome, fixado)
+    except ErroBackup as exc:
+        raise HTTPException(404, str(exc)) from exc
+    AUTH.registrar(autor, "Fixou backup" if fixado else "Desfixou backup", nome)
+    return {"ok": True}
+
+
+@app.delete("/api/backups/{nome}")
+def api_backup_apagar(nome: str, autor: Usuario = Depends(exigir_admin)) -> dict:
+    try:
+        BACKUPS.remover(nome)
+    except ErroBackup as exc:
+        raise HTTPException(409, str(exc)) from exc
+    AUTH.registrar(autor, "Apagou backup", nome)
+    return {"ok": True}

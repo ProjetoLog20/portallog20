@@ -32,6 +32,11 @@ services:
       # Banco PostgreSQL do servidor: o portal cria um banco e um usuario por solucao que pedir
       # ([banco] no manifesto), via "docker exec" neste container.
       PORTAL_POSTGRES_CONTAINER: log20-postgres
+      # Backup (tela Backups): pasta principal e, se PORTAL_BACKUP_COPIA_HOST estiver no .env,
+      # uma segunda copia (ex.: pasta de rede montada na VM). Horarios e retencao: tela ou .env.
+      PORTAL_BACKUP_PASTA: /backups
+      PORTAL_BACKUP_COPIA: ${PORTAL_BACKUP_COPIA_HOST:+/backups-copia}
+      TZ: America/Sao_Paulo
     ports:
       - "8000:8000"
     networks:
@@ -43,6 +48,10 @@ services:
       # Esta pasta (o clone do portal): codigo, manifestos em solucoes/ e dados em dados/.
       # O codigo das solucoes e clonado pelo portal em dados/fontes/.
       - .:/portal
+      # Backups fora da pasta de dados: por padrao ./backups (fora do Git); no .env,
+      # PORTAL_BACKUP_PASTA_HOST=/outro/disco muda o lugar.
+      - ${PORTAL_BACKUP_PASTA_HOST:-./backups}:/backups
+      - ${PORTAL_BACKUP_COPIA_HOST:-./backups-copia}:/backups-copia
 
   caddy:
     image: caddy:2
@@ -68,6 +77,8 @@ services:
       - caddy-dados:/data
 
   # Um PostgreSQL para as solucoes, so na rede interna (nenhuma porta aberta na maquina).
+  # Os dados ficam no volume log20-postgres-dados: atualizar ou recriar o container nao os apaga.
+  # Nunca use "docker compose down -v" (o -v apaga os volumes). Backup e restauracao: tela Backups.
   # Cada solucao tem banco e usuario proprios; um nao le os dados do outro.
   # A senha do administrador do banco fica no .env (PORTAL_POSTGRES_SENHA, gerada pelos scripts)
   # e so vale na primeira subida, quando o volume e criado.

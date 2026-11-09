@@ -79,6 +79,11 @@ class Solucao:
     # Banco no PostgreSQL do servidor: {configuracao: modelo com {db_host}, {db_senha}...}.
     # O portal cria banco + usuario e preenche essas configuracoes (so as vazias, uma vez).
     banco: dict[str, str] | None = None
+    # [backup]: incluir no backup diario (padrao sim) e banco externo (configuracao com a URL
+    # postgresql://, ex.: Supabase) a copiar com pg_dump, opcionalmente so alguns esquemas.
+    backup_incluir: bool = True
+    backup_externo: str = ""
+    backup_esquemas: list[str] = field(default_factory=list)
 
     @property
     def container(self) -> str:
@@ -185,6 +190,16 @@ def carregar_manifesto(caminho: Path) -> Solucao:
                 )
         banco = {str(k): str(v) for k, v in mapa.items()}
 
+    sec_backup = dados.get("backup", {})
+    if not isinstance(sec_backup, dict):
+        raise ManifestoInvalido(f"{caminho}: [backup] deve ser uma tabela")
+    externo = str(sec_backup.get("banco_externo", "")).strip()
+    if externo and externo not in {str(i.get("nome")) for i in dados.get("configuracoes", [])}:
+        raise ManifestoInvalido(f"{caminho}: [backup] banco_externo cita '{externo}', que nao esta em [[configuracoes]]")
+    esquemas = sec_backup.get("esquemas", [])
+    if not isinstance(esquemas, list) or not all(isinstance(e, str) and re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", e) for e in esquemas):
+        raise ManifestoInvalido(f"{caminho}: [backup] esquemas deve ser uma lista como [\"public\"]")
+
     configuracoes = []
     for item in dados.get("configuracoes", []):
         tipo = item.get("tipo", "texto")
@@ -236,6 +251,9 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         caminhos_publicos=list(publicos),
         dockerfile_portal=dockerfile_portal,
         banco=banco,
+        backup_incluir=bool(sec_backup.get("incluir", True)),
+        backup_externo=externo,
+        backup_esquemas=list(esquemas),
     )
 
 

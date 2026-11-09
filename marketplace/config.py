@@ -49,6 +49,12 @@ class Config:
     faixa_portas: tuple[int, int] | None
     # PostgreSQL do servidor (container na mesma rede das solucoes); vazio = sem banco gerenciado.
     postgres_container: str = ""
+    # Backup: pasta principal, pasta de copia (ex.: compartilhamento de rede montado na VM; None =
+    # sem copia), imagem usada para ler/gravar os volumes (ja existe no servidor) e fuso dos horarios.
+    backup_pasta: Path = RAIZ / "backups"
+    backup_copia: Path | None = None
+    backup_imagem: str = "postgres:17"
+    fuso: str = "America/Sao_Paulo"
 
     @property
     def pasta_solucoes_locais(self) -> Path:
@@ -77,6 +83,10 @@ def carregar() -> Config:
         portal_upstream=os.environ.get("PORTAL_UPSTREAM", "portal:8000").strip(),
         faixa_portas=_faixa(os.environ.get("PORTAL_FAIXA_PORTAS", "")),
         postgres_container=os.environ.get("PORTAL_POSTGRES_CONTAINER", "").strip(),
+        backup_pasta=Path(os.environ.get("PORTAL_BACKUP_PASTA", "").strip() or RAIZ / "backups"),
+        backup_copia=Path(c) if (c := os.environ.get("PORTAL_BACKUP_COPIA", "").strip()) else None,
+        backup_imagem=os.environ.get("PORTAL_BACKUP_IMAGEM", "").strip() or "postgres:17",
+        fuso=os.environ.get("PORTAL_FUSO", "").strip() or "America/Sao_Paulo",
     )
 
 

@@ -4,3 +4,6 @@ __pycache__/
 # Usuarios, sessoes, segredos e configuracoes de cada solucao
 dados/
 .env
+# Backups (bancos, volumes e dados do portal)
+backups/
+backups-copia/
