@@ -671,7 +671,11 @@ VAR_SEGREDO = re.compile(r"SECRET|PASSWORD|PASSWD|PASS$|SENHA|TOKEN$|_TOKEN_|API
 PASTAS_SEM_VARS = re.compile(r"(^|/)(scripts?|migrations?|seeds?|tests?|__tests__|spec|fixtures|docs?|frontend|client|web|public|static)/", re.I)
 VAR_BOOL = re.compile(r"ENABLE|ENABLED|^USE_|_USE_|DISABLE|^DEBUG_|_DEBUG$|ATIVO|ATIVAR|^IS_|^HAS_")
 VAR_GERADA = re.compile(r"^(SECRET_KEY|SECRET|APP_SECRET|APP_KEY_SECRET|JWT_SECRET|JWT_SECRET_KEY|SESSION_SECRET|COOKIE_SECRET|FLASK_SECRET_KEY|ENCRYPTION_KEY)$")
-VARS_BUILD = re.compile(r"^(VITE_|REACT_APP_|NEXT_PUBLIC_|VUE_APP_|NUXT_PUBLIC_)")
+VARS_BUILD = re.compile(r"^(VITE_|REACT_APP_|NEXT_PUBLIC_|VUE_APP_|NUXT_PUBLIC_|PUBLIC_|EXPO_PUBLIC_)")
+# import.meta.env que o proprio Vite preenche.
+VARS_VITE_INTERNAS = {"BASE_URL", "MODE", "DEV", "PROD", "SSR"}
+# Arquivos de variaveis que o Vite/CRA leem na construcao (o .env.local costuma ficar fora do Git).
+ARQS_ENV_FRONT = re.compile(r"(^|/)\.env(\.local|\.production|\.production\.local|\.development)?$")
 _NOME = r"([A-Z][A-Z0-9_]{1,63})"
 _LIT = r"""\s*(?:"([^"\n]{0,200})"|'([^'\n]{0,200})'|(-?\d+(?:\.\d+)?|True|False|true|false|None|null))"""
 
@@ -684,6 +688,8 @@ PADROES_VARS = [
     (r"\bconfig\(\s*[\"']" + _NOME + r"[\"']\s*(?:,\s*default\s*=" + _LIT + r")?", True, True),
     # Node
     (r"process\.env\.([A-Z][A-Z0-9_]{1,63})(?:\s*(?:\|\||\?\?)" + _LIT + r")?", True, False),
+    # Vite (frontend): lidas na construcao
+    (r"import\.meta\.env\.([A-Z][A-Z0-9_]{1,63})(?:\s*(?:\|\||\?\?)" + _LIT + r")?", True, False),
     (r"process\.env\[\s*[\"']" + _NOME + r"[\"']\s*\](?:\s*(?:\|\||\?\?)" + _LIT + r")?", True, False),
     # PHP
     (r"(?:getenv|env)\(\s*[\"']" + _NOME + r"[\"']\s*(?:," + _LIT + r")?", True, False),
@@ -718,6 +724,20 @@ def _exemplos_env(repo: Repo) -> dict[str, tuple[str, str]]:
     return vars_
 
 
+def _arquivos_env(repo: Repo) -> dict[str, tuple[str, str]]:
+    """Variaveis de .env, .env.local, .env.production... que estejam no repositorio (sites estaticos).
+    O valor so serve de padrao quando nao parece segredo (quem decide e _variaveis)."""
+    vars_: dict[str, tuple[str, str]] = {}
+    for arq in repo.arquivos:
+        if not ARQS_ENV_FRONT.search(arq):
+            continue
+        for linha in repo.ler(arq).splitlines():
+            m = re.match(r"\s*(?:export\s+)?([A-Z][A-Z0-9_]{1,63})\s*=\s*(.*)$", linha)
+            if m:
+                vars_.setdefault(m.group(1), (m.group(2).strip().strip("\"'"), f"Está em {arq}."))
+    return vars_
+
+
 def _parece_exemplo(valor: str) -> bool:
     return bool(re.search(r"(?i)troque|change|your|seu|sua|xxx|<|exemplo|example|aqui|here|placeholder|\*\*\*|senha|password|secret", valor))
 
@@ -748,7 +768,31 @@ def _variaveis(repo: Repo, an: dict) -> None:
                     v["padrao"] = padrao_valor
                 # Obrigatoria so se todos os usos sao do tipo que quebra sem valor (ex.: os.environ["X"]).
                 v["obrigatoria"] = v["obrigatoria"] and obrig and padrao_valor is None
+    site = an["tecnologia"] == "spa"  # tudo o que um site estatico le vem da construcao
+    apelidos: set[str] = set()
+    lidas_config: set[str] = set()
+    if site or an["tecnologia"] == "nextjs":
+        for arq in repo.arquivos:
+            if not re.match(r"^(vite|next)\.config\.(ts|js|mjs|cjs|mts)$", Path(arq).name):
+                continue
+            texto = repo.ler(arq)
+            # define: { 'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY) } -> API_KEY e so um apelido.
+            apelidos |= set(re.findall(r"""['"]process\.env\.([A-Z_][A-Z0-9_]*)['"]\s*:""", texto))
+            # Lidas de verdade: env.X / env['X'] (loadEnv) e process.env.X fora de aspas (as chaves do
+            # define ficam entre aspas e nao contam).
+            for m in re.finditer(r"""(?<![.\w])env\.([A-Z][A-Z0-9_]{1,63})\b|(?<![.\w])env\[\s*['"]([A-Z][A-Z0-9_]{1,63})['"]\s*\]"""
+                                 r"""|(?<!['"])process\.env\.([A-Z][A-Z0-9_]{1,63})\b""", texto):
+                nome = next(g for g in m.groups() if g)
+                lidas_config.add(nome)
+                v = achadas.setdefault(nome, {"arquivos": [], "padrao": None, "obrigatoria": False, "bool": False})
+                v["obrigatoria"] = False
+                if arq not in v["arquivos"]:
+                    v["arquivos"].append(arq)
+        for nome in apelidos - lidas_config:
+            achadas.pop(nome, None)
     exemplos = _exemplos_env(repo)
+    if site:
+        exemplos = {**_arquivos_env(repo), **exemplos}
     for nome, (valor, comentario) in exemplos.items():
         v = achadas.setdefault(nome, {"arquivos": [], "padrao": None, "obrigatoria": False})
         v["exemplo"], v["comentario"] = valor, comentario
@@ -756,19 +800,17 @@ def _variaveis(repo: Repo, an: dict) -> None:
             v["padrao"] = valor
 
     ja = {c["nome"] for c in an["configuracoes"]} | set(an["segredos"]) | set(an["ambiente"]) | set(an.get("banco") or {})
-    de_build = []
+    expostas = []
     for nome in sorted(achadas):
         v = achadas[nome]
-        if nome in VARS_DO_SISTEMA or nome in ja:
+        if nome in VARS_DO_SISTEMA or nome in ja or nome in VARS_VITE_INTERNAS:
             continue
-        if VARS_BUILD.match(nome):
-            de_build.append(nome)
-            continue
-        if VARS_ENDERECO.match(nome):
+        construcao = site or bool(VARS_BUILD.match(nome))
+        if not construcao and VARS_ENDERECO.match(nome):
             an["ambiente"][nome] = "{url}"
             continue
         # Chave interna do proprio sistema (assinar sessoes/tokens): o portal gera e guarda sozinho.
-        if VAR_GERADA.search(nome) and not re.search(r"API|CLIENT|OAUTH|AWS|STRIPE|GOOGLE", nome):
+        if not construcao and VAR_GERADA.search(nome) and not re.search(r"API|CLIENT|OAUTH|AWS|STRIPE|GOOGLE", nome):
             if nome not in an["segredos"]:
                 an["segredos"].append(nome)
             continue
@@ -784,15 +826,22 @@ def _variaveis(repo: Repo, an: dict) -> None:
         ajuda = (ajuda + " " if ajuda else "") + f"Lida em {onde}."
         if v["obrigatoria"]:
             ajuda += " O código não tem valor padrão: sem ela o sistema não sobe."
+        if construcao:
+            ajuda += " Entra no site na construção: depois de mudar, clique em Atualizar."
+            if VAR_SEGREDO.search(nome):
+                expostas.append(nome)
         an["configuracoes"].append({"nome": nome, "rotulo": nome, "tipo": tipo, "padrao": padrao_txt, "ajuda": ajuda,
-                                    "obrigatoria": bool(v["obrigatoria"] and not padrao_txt), "detectada": True})
+                                    "obrigatoria": bool(v["obrigatoria"] and not padrao_txt), "detectada": True,
+                                    "construcao": construcao})
         if len(an["configuracoes"]) >= 40:
             break
-    if de_build:
-        an["avisos"].append(Aviso("info", "Variaveis usadas na hora do build",
-                                  "Estas variáveis entram no site quando ele e construido, não quando ele roda; as "
-                                  "Configurações do portal não chegam até elas. Use caminhos relativos ou valores fixos.",
-                                  de_build[:8]))
+    if expostas:
+        an["avisos"].append(Aviso(
+            "atencao", "Chave secreta dentro do site",
+            "Estas variáveis são gravadas no site quando ele é construído: qualquer pessoa que abrir o sistema "
+            "consegue ler o valor pelo navegador (F12). Para chaves de API pagas (Gemini, OpenAI...), o certo é o "
+            "site chamar um servidor que guarda a chave. Se for usar assim mesmo, crie uma chave só para este "
+            "sistema, com limite de gastos.", expostas[:8]))
 
 
 # ---------------------------------------------------------------- entrada

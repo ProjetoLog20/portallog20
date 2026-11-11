@@ -158,6 +158,11 @@ ajuda = "Explique em uma frase o que muda quando esta opção está ligada."
 # ajuda = "Em branco usa o banco local."
 
 
+# Site estatico (Vite/React/Vue): as variaveis so existem na construcao. Em [build]:
+#   variaveis_na_construcao = true
+# ou, em cada [[configuracoes]] lida ao compilar:  construcao = true
+# (VITE_, REACT_APP_, NEXT_PUBLIC_... ja vao para a construcao sozinhas.)
+
 # ----------------------------------------------------------------------------
 # Recursos (opcional). Sem esta parte vale o padrao do servidor (1 GB, 1 nucleo).
 # Passou do limite de memoria: a solucao e reiniciada; o administrador muda em Uso > Limites.

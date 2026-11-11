@@ -380,6 +380,7 @@ def api_detalhe(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
                 "tipo": c.tipo,
                 "ajuda": c.ajuda,
                 "obrigatoria": c.obrigatoria,
+                "construcao": sol.variaveis_na_construcao or c.na_construcao,
                 # Segredos nunca saem do portal: so informamos se existe valor.
                 "valor": None if c.tipo == "segredo" else valores.get(c.nome, ""),
                 "definido": bool(valores.get(c.nome)),
@@ -424,7 +425,12 @@ def api_configurar(sid: str, valores: dict = Body(..., embed=True), _: Usuario =
         ger().armazenamento.atualizar_configuracoes(sol, valores)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"ok": True, "aviso": "Reinicie a solucao para aplicar as mudancas."}
+    de_build = [c.rotulo for c in sol.configuracoes
+                if (sol.variaveis_na_construcao or c.na_construcao) and c.nome in valores]
+    if de_build:
+        return {"ok": True, "acao": "reconstruir",
+                "aviso": f"{', '.join(de_build)} entra(m) no sistema na construcao: clique em Atualizar para valer."}
+    return {"ok": True, "acao": "iniciar", "aviso": "Reinicie a solucao para aplicar as mudancas."}
 
 
 @app.post("/api/solucoes/{sid}/banco/restaurar")
@@ -511,10 +517,14 @@ def api_assistente_editar(sid: str, dados: dict = Body(..., embed=True), autor: 
         raise HTTPException(400, str(exc)) from exc
     _carregar()
     depois = assistente.para_edicao(CFG, _solucao(sid))
-    mudou_build = (antes["dockerfile"], antes["arquivos"], antes["repositorio"], antes["ref"], antes["subpasta"]) != (
-        depois["dockerfile"], depois["arquivos"], depois["repositorio"], depois["ref"], depois["subpasta"])
+    def do_build(e: dict) -> tuple:
+        construcao = sorted(c["nome"] for c in e["configuracoes"] if c.get("construcao"))
+        return (e["dockerfile"], e["arquivos"], e["repositorio"], e["ref"], e["subpasta"],
+                e.get("variaveis_na_construcao"), construcao, e["ambiente"] if e.get("variaveis_na_construcao") else None)
+
+    mudou_build = do_build(antes) != do_build(depois)
     AUTH.registrar(autor, "Editou solução do assistente", sid)
-    return {**r, "aviso": "Para valer, clique em Atualizar: o Dockerfile ou a origem do código mudou." if mudou_build
+    return {**r, "aviso": "Para valer, clique em Atualizar: o Dockerfile, a origem do código ou as variáveis da construção mudaram." if mudou_build
             else "Para valer, clique em Reiniciar.", "acao": "reconstruir" if mudou_build else "iniciar"}
 
 

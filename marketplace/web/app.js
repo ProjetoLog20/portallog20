@@ -672,6 +672,9 @@ function montarFormulario(form, sol) {
     form.append(h("p", { class: "nota" }, "Esta solução não tem configurações."));
     return;
   }
+  if (sol.configuracoes.some((c) => c.construcao)) {
+    form.append(h("p", { class: "nota acima" }, "Campos \u201cNa construção\u201d são gravados no sistema quando ele é compilado (ex.: sites Vite ou React): depois de mudar, clique em Atualizar, não em Reiniciar."));
+  }
   for (const c of sol.configuracoes) {
     const idCampo = `cfg-${c.nome}`;
     const limpar = c.tipo === "segredo" && c.definido
@@ -694,7 +697,8 @@ function montarFormulario(form, sol) {
       form.append(h("div", { class: "campo" },
         h("label", { for: idCampo }, c.rotulo,
           c.tipo === "segredo" ? h("span", { class: "etiqueta" }, c.definido ? "Definido" : "Vazio") : null,
-          c.obrigatoria && !c.definido ? h("span", { class: "etiqueta obrigatoria" }, "Obrigatório") : null),
+          c.obrigatoria && !c.definido ? h("span", { class: "etiqueta obrigatoria" }, "Obrigatório") : null,
+          c.construcao ? h("span", { class: "etiqueta", title: "Gravado no sistema na construção: muda só depois de Atualizar" }, "Na construção") : null),
         h("input", {
           id: idCampo, name: c.nome, autocomplete: "off",
           type: c.tipo === "segredo" ? "password" : "text",
@@ -1448,8 +1452,12 @@ function valoresDaAnalise(an) {
     configuracoes: an.configuracoes.map((c) => ({ ...c, incluir: true })),
     banco: an.banco, usar_banco: !!an.banco,
     tem_dockerfile: an.tem_dockerfile, dockerfile: an.dockerfile, arquivos: { ...(an.arquivos || {}) },
+    variaveis_na_construcao: an.tecnologia === "spa",
   };
 }
+
+/** Variáveis que os empacotadores de frontend só leem ao compilar (iguais às do portal). */
+const PREFIXO_CONSTRUCAO = /^(VITE_|REACT_APP_|NEXT_PUBLIC_|VUE_APP_|NUXT_PUBLIC_|PUBLIC_|EXPO_PUBLIC_)/;
 
 /** Tabela das configurações que o sistema lê: cada uma vira um campo em Configurações. */
 function tabelaConfiguracoes(lista, banco) {
@@ -1463,6 +1471,9 @@ function tabelaConfiguracoes(lista, banco) {
       [["texto", "Texto"], ["segredo", "Segredo"], ["booleano", "Sim/não"]].map(([v, r]) => h("option", { value: v, selected: (c.tipo || "texto") === v }, r)));
     const padrao = h("input", { type: "text", value: c.padrao || "", "aria-label": "Valor padrão", placeholder: "sem padrão" });
     const obrig = h("input", { type: "checkbox", checked: !!c.obrigatoria, "aria-label": "Obrigatória" });
+    const constr = h("input", { type: "checkbox", checked: !!c.construcao || PREFIXO_CONSTRUCAO.test(c.nome || ""),
+      "aria-label": "Entra na construção", title: "Entra no sistema na construção (Vite, React, Next...): muda só depois de Atualizar" });
+    nome.addEventListener("input", () => { if (PREFIXO_CONSTRUCAO.test(nome.value.trim())) constr.checked = true; });
     const sincronizar = () => { padrao.disabled = tipo.value === "segredo"; if (padrao.disabled) padrao.value = ""; };
     tipo.addEventListener("change", sincronizar);
     sincronizar();
@@ -1470,27 +1481,30 @@ function tabelaConfiguracoes(lista, banco) {
       h("td", { class: "col-check" }, incluir),
       h("td", {}, nome, c.ajuda ? h("small", { class: "cfg-ajuda" }, c.ajuda) : null,
         doBanco.has(c.nome) ? h("small", { class: "cfg-ajuda" }, "Preenchida com o banco do servidor.") : null),
-      h("td", {}, tipo), h("td", {}, padrao), h("td", { class: "col-check" }, obrig));
-    linhas.push({ c, incluir, nome, tipo, padrao, obrig, tr });
+      h("td", {}, tipo), h("td", {}, padrao), h("td", { class: "col-check" }, obrig), h("td", { class: "col-check" }, constr));
+    linhas.push({ c, incluir, nome, tipo, padrao, obrig, constr, tr });
     corpo.append(tr);
   };
   lista.forEach(novaLinha);
   const el = h("div", { class: "campo" },
     h("label", {}, "Configurações que o sistema lê"),
-    h("small", { class: "sem-topo" }, "Cada linha vira um campo em Gerenciar → Configurações, onde o administrador preenche o valor. Segredos nunca aparecem na tela. Marque Obrigatória quando o sistema não sobe sem ela."),
+    h("small", { class: "sem-topo" }, "Cada linha vira um campo em Gerenciar → Configurações, onde o administrador preenche o valor. Segredos nunca aparecem na tela. Marque Obrigatória quando o sistema não sobe sem ela, e Construção quando o valor é gravado no sistema ao compilar (Vite, React, Next): aí ele só muda depois de Atualizar."),
     h("div", { class: "tabela-rolagem limite" },
       h("table", { class: "tabela-simples tabela-cfg" },
-        h("thead", {}, h("tr", {}, ["Usar", "Variável", "Tipo", "Valor padrão", "Obrig."].map((x) => h("th", {}, x)))),
+        h("thead", {}, h("tr", {}, ["Usar", "Variável", "Tipo", "Valor padrão", "Obrig.", "Construção"].map((x) => h("th", {}, x)))),
         corpo)),
     h("div", { class: "linha-botoes topo-8" },
       h("button", { type: "button", class: "botao pequeno", onclick: () => { novaLinha({ nome: "", tipo: "texto", incluir: true }); linhas.at(-1).nome.focus(); } }, "Adicionar configuração")));
   const valores = () => linhas
     .filter((l) => l.incluir.checked && l.nome.value.trim())
     .map((l) => ({ nome: l.nome.value.trim(), rotulo: l.c.rotulo && l.c.nome === l.nome.value.trim() ? l.c.rotulo : l.nome.value.trim(),
-                   tipo: l.tipo.value, padrao: l.padrao.value, ajuda: l.c.ajuda || "", obrigatoria: l.obrig.checked }));
+                   tipo: l.tipo.value, padrao: l.padrao.value, ajuda: l.c.ajuda || "", obrigatoria: l.obrig.checked,
+                   construcao: l.constr.checked }));
   const adicionar = (c) => novaLinha({ ...c, incluir: true });
   const nomes = () => new Set(linhas.map((l) => l.nome.value.trim()));
-  return { el, valores, adicionar, nomes };
+  const semConstrucao = () => new Set(linhas.filter((l) => !l.constr.checked).map((l) => l.nome.value.trim()));
+  const marcarConstrucao = (lista) => { for (const l of linhas) if (lista.includes(l.nome.value.trim())) l.constr.checked = true; };
+  return { el, valores, adicionar, nomes, semConstrucao, marcarConstrucao };
 }
 
 /** Formulário da solução (criar ou editar). */
@@ -1524,6 +1538,10 @@ function formularioSolucao(v, { modo, aoSalvar }) {
       campo("ns-porta", "Porta da aplicação", v.porta_container, { type: "number" }, "Onde o sistema escuta dentro do container."),
       campo("ns-saude", "Rota de saúde", v.caminho_saude, {}, "O portal testa esta rota para saber se está no ar.")),
     usarBanco,
+    h("label", { class: "campo-check" },
+      h("input", { type: "checkbox", id: "ns-construcao", checked: !!v.variaveis_na_construcao }),
+      h("span", {}, h("strong", {}, "Site estático: todas as variáveis entram na construção"),
+        h("small", {}, " Para sites Vite, React ou Vue servidos como arquivos: nada lê variável quando o site está no ar, então as variáveis fixas e todas as configurações vão para o build. Mudou um valor? Clique em Atualizar."))),
     tabela.el,
     dockerfile ? h("div", { class: "campo" },
       h("label", { for: "ns-dockerfile" }, "Dockerfile"),
@@ -1563,6 +1581,7 @@ function formularioSolucao(v, { modo, aoSalvar }) {
       banco: v.banco, usar_banco: usar,
       dockerfile: dockerfile ? dockerfile.value : null,
       arquivos,
+      variaveis_na_construcao: !!form.querySelector("#ns-construcao")?.checked,
     };
     try { await aoSalvar(dados); } catch (e) { erro.textContent = e.message; erro.hidden = false; botao.disabled = false; }
   });
@@ -1572,7 +1591,12 @@ function formularioSolucao(v, { modo, aoSalvar }) {
     const atuais = tabela.nomes();
     const novas = an.configuracoes.filter((c) => !atuais.has(c.nome) && !(v.segredos || []).includes(c.nome));
     const dockerNovo = an.dockerfile && dockerfile && an.dockerfile.trim() !== dockerfile.value.trim();
-    return { novas, dockerNovo,
+    const sem = tabela.semConstrucao();
+    const paraConstrucao = an.configuracoes.filter((c) => c.construcao && atuais.has(c.nome) && sem.has(c.nome)).map((c) => c.nome);
+    const siteEstatico = an.tecnologia === "spa" && !form.querySelector("#ns-construcao")?.checked;
+    return { novas, dockerNovo, paraConstrucao, siteEstatico,
+      marcarConstrucao: () => tabela.marcarConstrucao(paraConstrucao),
+      marcarSiteEstatico: () => { form.querySelector("#ns-construcao").checked = true; },
       adicionar: (c) => tabela.adicionar(c),
       usarDockerfile: () => { dockerfile.value = an.dockerfile; arquivos = { ...(an.arquivos || {}) }; pintarNota(); } };
   };
@@ -1648,6 +1672,18 @@ function pintarReanalise(alvo, an, ap) {
         ev.currentTarget.disabled = true;
         toast(`${plural(n, "configuração adicionada", "configurações adicionadas")} à tabela. Salve para valer.`);
       } }, "Adicionar as marcadas")));
+  }
+  if (ap.siteEstatico) {
+    itens.push(h("div", { class: "bloco" },
+      h("h3", {}, "É um site estático: as variáveis precisam entrar na construção"),
+      h("p", { class: "nota" }, "Num site Vite/React servido como arquivos, nada lê variável quando ele está no ar: os valores são gravados no site ao compilar. Marque para o portal passar as variáveis fixas e as configurações para o build."),
+      h("button", { type: "button", class: "botao pequeno", onclick: (ev) => { ap.marcarSiteEstatico(); ev.currentTarget.disabled = true; toast("Marcado. Salve e depois clique em Atualizar."); } }, "Marcar site estático")));
+  }
+  if (ap.paraConstrucao.length) {
+    itens.push(h("div", { class: "bloco" },
+      h("h3", {}, "Configurações lidas na construção"),
+      h("p", { class: "nota" }, `${ap.paraConstrucao.join(", ")}: o código lê na hora de compilar, então o valor só chega ao sistema pelo build.`),
+      h("button", { type: "button", class: "botao pequeno", onclick: (ev) => { ap.marcarConstrucao(); ev.currentTarget.disabled = true; toast("Marcadas. Salve e depois clique em Atualizar."); } }, "Marcar para a construção")));
   }
   if (ap.dockerNovo) {
     itens.push(h("div", { class: "bloco" },

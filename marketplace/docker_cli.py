@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -113,13 +114,17 @@ def stream(args: list[str], on_line: Callable[[str], None], env: dict[str, str] 
 
 
 def build(context: Path, dockerfile: Path, image: str, on_line: Callable[[str], None],
-          contextos: dict[str, Path] | None = None) -> None:
-    """`contextos`: contextos extras do BuildKit (COPY --from=<nome> no Dockerfile)."""
+          contextos: dict[str, Path] | None = None, build_args: dict[str, str] | None = None) -> None:
+    """`contextos`: contextos extras do BuildKit (COPY --from=<nome> no Dockerfile).
+    `build_args`: valores para a construcao. Vao pelo ambiente do processo (`--build-arg NOME` sem
+    valor), para nao aparecerem na linha de comando nem no log."""
     extras = [a for nome, pasta in (contextos or {}).items() for a in ("--build-context", f"{nome}={pasta}")]
+    for nome in build_args or {}:
+        extras += ["--build-arg", nome]
     code = stream(
         ["build", "--progress=plain", "-t", image, "-f", str(dockerfile), *extras, str(context)],
         on_line,
-        env={"DOCKER_BUILDKIT": "1"},
+        env={"DOCKER_BUILDKIT": "1", **(build_args or {})},
     )
     if code != 0:
         raise DockerError(f"docker build terminou com codigo {code}")
@@ -287,3 +292,23 @@ def listar_json(args: list[str], timeout: float = 60) -> list[dict]:
 def rodar(args: list[str], timeout: float = 600) -> str:
     """docker <args>; devolve a saida ou levanta DockerError."""
     return _check(_run(args, timeout=timeout), f"Falha em docker {args[0]}")
+
+
+def com_args(dockerfile: Path, nomes: list[str], destino: Path) -> Path:
+    """Copia do Dockerfile com `ARG <nome>` logo depois de cada FROM (sem isso o docker build
+    ignora o --build-arg). Copia junto o .dockerignore que valia para o original. Devolve o caminho."""
+    destino.mkdir(parents=True, exist_ok=True)
+    linhas = []
+    for linha in dockerfile.read_text(encoding="utf-8").splitlines():
+        linhas.append(linha)
+        if re.match(r"^\s*FROM\s", linha, re.I):
+            linhas += [f"ARG {n}" for n in nomes]
+    novo = destino / "Dockerfile"
+    novo.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+    ignore = dockerfile.with_name(dockerfile.name + ".dockerignore")
+    copia_ignore = destino / "Dockerfile.dockerignore"
+    if ignore.is_file():
+        copia_ignore.write_text(ignore.read_text(encoding="utf-8"), encoding="utf-8")
+    else:
+        copia_ignore.unlink(missing_ok=True)
+    return novo

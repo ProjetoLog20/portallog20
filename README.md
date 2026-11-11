@@ -254,6 +254,26 @@ ou a do usuário de uma solução, que só enxerga o próprio banco).
 Remover uma solução do portal não apaga o banco dela. Para apagar (irreversível):
 `sudo docker compose exec postgres psql -U postgres -c 'DROP DATABASE jornada_lideranca'`.
 
+## Variáveis na construção (sites Vite, React, Next)
+
+Num site Vite/React/Vue servido como arquivos, as variáveis **não são lidas quando o site está no
+ar**: o `npm run build` grava os valores dentro do site. Por isso o portal passa para o
+`docker build` (como `--build-arg`, pelo ambiente do processo, sem aparecer no log):
+
+- as configurações com `construcao = true` no manifesto (coluna **Construção** no assistente);
+- as configurações e variáveis fixas com prefixo `VITE_`, `REACT_APP_`, `NEXT_PUBLIC_`, `VUE_APP_`,
+  `NUXT_PUBLIC_`, `PUBLIC_` ou `EXPO_PUBLIC_` (sempre);
+- num **site estático** (`[build] variaveis_na_construcao = true`, que o assistente marca para
+  Vite/React/Vue), todas as variáveis fixas e todas as configurações.
+
+O portal acrescenta `ARG <nome>` depois de cada `FROM` numa cópia do Dockerfile (o original não
+muda), então funciona também com o Dockerfile do repositório. Mudou um valor desses? Clique em
+**Atualizar** (reconstrói), não em Reiniciar; a tela avisa. O assistente acha essas variáveis em
+`import.meta.env.*`, no `vite.config` (`loadEnv` → `env.X`, como o `GEMINI_API_KEY` do
+`.env.local` dos projetos do Google AI Studio) e nos `.env*` do repositório. **Atenção:** o que
+entra na construção fica visível para quem abre o site (F12); chave de API paga num site estático
+fica exposta, e o assistente avisa.
+
 ## Uso e limites de memória/CPU
 
 Tela **Uso** (administradores): memória, CPU e disco da VM; gráficos de memória e CPU de cada

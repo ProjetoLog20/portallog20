@@ -20,6 +20,11 @@ PUBLICO_RE = re.compile(r"^/[A-Za-z0-9._~/-]*\*?$")
 REF_RE = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,99}$")
 
 
+# Prefixos que os empacotadores de frontend so leem na construcao (e gravam no site): sempre vao
+# para o docker build, mesmo sem `construcao = true` no manifesto.
+VARS_PUBLICAS_BUILD = re.compile(r"^(VITE_|REACT_APP_|NEXT_PUBLIC_|VUE_APP_|NUXT_PUBLIC_|PUBLIC_|EXPO_PUBLIC_)")
+
+
 def memoria_mb(valor) -> int:
     """'512m', '1g', '1.5g', '768' (MB) ou 768 -> megabytes. 0 = sem limite."""
     texto = str(valor).strip().lower().replace(",", ".")
@@ -57,6 +62,13 @@ class Configuracao:
     ajuda: str = ""
     # True: a solucao nao inicia enquanto o admin nao preencher (o portal avisa qual campo).
     obrigatoria: bool = False
+    # True: o valor entra na CONSTRUCAO da imagem (docker build --build-arg), alem do ambiente.
+    # Para sites que gravam as variaveis no codigo ao compilar (Vite, React, Next NEXT_PUBLIC_...).
+    construcao: bool = False
+
+    @property
+    def na_construcao(self) -> bool:
+        return self.construcao or bool(VARS_PUBLICAS_BUILD.match(self.nome))
 
 
 @dataclass
@@ -98,6 +110,9 @@ class Solucao:
     caminhos_publicos: list[str] = field(default_factory=list)
     # Dockerfile guardado com o manifesto (gerado pelo assistente), usado no lugar do do repositorio.
     dockerfile_portal: Path | None = None
+    # [build] variaveis_na_construcao = true: site estatico (Vite/React...). Nada le variavel quando
+    # o site roda, entao TODAS as variaveis (fixas e configuracoes) vao para a construcao.
+    variaveis_na_construcao: bool = False
     # True: manifesto criado pelo assistente neste servidor (dados/solucoes-locais), fora do Git.
     local: bool = False
     # Banco no PostgreSQL do servidor: {configuracao: modelo com {db_host}, {db_senha}...}.
@@ -249,6 +264,7 @@ def carregar_manifesto(caminho: Path) -> Solucao:
                 padrao=str(item.get("padrao", "")),
                 ajuda=str(item.get("ajuda", "")),
                 obrigatoria=bool(item.get("obrigatoria", False)),
+                construcao=bool(item.get("construcao", False)),
             )
         )
 
@@ -286,6 +302,7 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         subpasta=subpasta,
         caminhos_publicos=list(publicos),
         dockerfile_portal=dockerfile_portal,
+        variaveis_na_construcao=bool(build.get("variaveis_na_construcao", False)),
         banco=banco,
         backup_incluir=bool(sec_backup.get("incluir", True)),
         backup_externo=externo,

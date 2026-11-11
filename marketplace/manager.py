@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from . import banco as banco_pg
 from . import docker_cli, fontes
-from .catalog import Solucao
+from .catalog import VARS_PUBLICAS_BUILD, Solucao
 from .config import Config
 
 ACOES = {"instalar", "iniciar", "parar", "reconstruir", "remover"}
@@ -220,6 +220,21 @@ class Gerenciador:
         return f"http://{self.config.host_interno}:{sol.porta_host}"
 
     # ---------- ambiente ----------
+    def variaveis_de_construcao(self, sol: Solucao) -> dict[str, str]:
+        """Variaveis passadas ao docker build (--build-arg): as configuracoes marcadas `construcao`
+        (ou com prefixo VITE_, REACT_APP_, NEXT_PUBLIC_...) e as fixas com esses prefixos. Num site
+        estatico (`variaveis_na_construcao`), todas as fixas e todas as configuracoes."""
+        url = self.url(sol)
+        host = urlparse(url).hostname or ""
+        valores = self.armazenamento.configuracoes(sol)
+        todas = sol.variaveis_na_construcao
+        args = {k: v.replace("{url}", url).replace("{host}", host) for k, v in sol.ambiente.items()
+                if todas or VARS_PUBLICAS_BUILD.match(k)}
+        for c in sol.configuracoes:
+            if todas or c.na_construcao:
+                args[c.nome] = str(valores.get(c.nome, ""))
+        return args
+
     def ambiente(self, sol: Solucao) -> dict[str, str]:
         url = self.url(sol)
         host = urlparse(url).hostname or ""
@@ -338,7 +353,16 @@ class Gerenciador:
         tarefa.registrar(f"$ docker build -t {sol.imagem} {contexto}")
         # Arquivos auxiliares do Dockerfile do portal (ex.: portal-saude) vem da pasta do manifesto.
         contextos = {"portal": sol.dockerfile_portal.parent} if sol.dockerfile_portal else None
-        docker_cli.build(contexto, dockerfile, sol.imagem, tarefa.registrar, contextos)
+        # Configuracoes lidas na construcao (ex.: VITE_ de sites Vite): vao como --build-arg.
+        build_args = self.variaveis_de_construcao(sol)
+        if build_args:
+            vazias = [n for n, v in build_args.items() if not v]
+            tarefa.registrar(f"Configuracoes passadas para a construcao: {', '.join(build_args)}"
+                             + (f" (vazias: {', '.join(vazias)})" if vazias else ""))
+            # Copia do Dockerfile com os ARG (o .dockerignore que valia continua valendo: o do lado do
+            # Dockerfile vai junto; sem ele, o BuildKit usa o da raiz do repositorio, como antes).
+            dockerfile = docker_cli.com_args(dockerfile, list(build_args), self.config.pasta_dados / "build" / sol.id)
+        docker_cli.build(contexto, dockerfile, sol.imagem, tarefa.registrar, contextos, build_args)
         tarefa.registrar("Imagem construida com sucesso.")
         if versao:
             info = {"commit": versao.commit, "resumo": versao.resumo, "data": versao.data, "ref": sol.ref}

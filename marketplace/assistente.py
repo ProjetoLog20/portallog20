@@ -157,6 +157,9 @@ def gerar_manifesto(d: dict, com_dockerfile: bool) -> str:
     if com_dockerfile:
         linhas.append('# Dockerfile sugerido pelo assistente, guardado nesta pasta (o repositorio nao precisa ter um).')
         linhas.append('dockerfile_portal = "Dockerfile"')
+    if d.get("variaveis_na_construcao"):
+        linhas.append("# Site estatico: as variaveis entram no site na construcao (Atualizar depois de mudar).")
+        linhas.append("variaveis_na_construcao = true")
     linhas += [
         "",
         "[execucao]",
@@ -184,6 +187,8 @@ def gerar_manifesto(d: dict, com_dockerfile: bool) -> str:
             linhas.append(f"ajuda = {_s(c['ajuda'])}")
         if c.get("obrigatoria"):
             linhas.append("obrigatoria = true")
+        if c.get("construcao"):
+            linhas.append("construcao = true")
     return "\n".join(linhas) + "\n"
 
 
@@ -239,7 +244,7 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao], editando: str | 
             padrao = ""  # segredo nao tem valor padrao no manifesto (iria para o Git)
         configuracoes.append({"nome": nome_c, "rotulo": " ".join(str(c.get("rotulo") or nome_c).split())[:120],
                               "tipo": tipo, "padrao": padrao[:500], "ajuda": " ".join(str(c.get("ajuda") or "").split())[:500],
-                              "obrigatoria": bool(c.get("obrigatoria"))})
+                              "obrigatoria": bool(c.get("obrigatoria")), "construcao": bool(c.get("construcao"))})
     for nome_c in list(ambiente):
         if nome_c in vistos:
             ambiente.pop(nome_c)  # a configuracao editavel vale no lugar do valor fixo
@@ -274,7 +279,8 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao], editando: str | 
             "tecnologia": str(d.get("tecnologia") or "")[:80], "repositorio": repositorio, "ref": ref, "subpasta": subpasta,
             "porta_container": porta_c, "porta_host": porta_h, "caminho_saude": saude, "ambiente": ambiente,
             "volumes": volumes, "segredos": segredos, "configuracoes": configuracoes, "banco": banco,
-            "dockerfile": dockerfile, "arquivos": arquivos if dockerfile else {}}
+            "dockerfile": dockerfile, "arquivos": arquivos if dockerfile else {},
+            "variaveis_na_construcao": bool(d.get("variaveis_na_construcao"))}
 
 
 FIXOS = {"solucao.toml", "Dockerfile", "Dockerfile.dockerignore"}
@@ -349,8 +355,9 @@ def para_edicao(cfg: Config, sol: Solucao) -> dict:
         "porta_container": sol.porta_container, "porta_host": sol.porta_host, "caminho_saude": sol.caminho_saude,
         "ambiente": dict(sol.ambiente), "volumes": dict(sol.volumes), "segredos": list(sol.segredos),
         "configuracoes": [{"nome": c.nome, "rotulo": c.rotulo, "tipo": c.tipo, "padrao": c.padrao, "ajuda": c.ajuda,
-                           "obrigatoria": c.obrigatoria} for c in sol.configuracoes],
+                           "obrigatoria": c.obrigatoria, "construcao": c.na_construcao} for c in sol.configuracoes],
         "banco": dict(sol.banco) if sol.banco else None, "usar_banco": bool(sol.banco),
+        "variaveis_na_construcao": sol.variaveis_na_construcao,
         "tem_dockerfile": not df.is_file(), "dockerfile": df.read_text(encoding="utf-8") if df.is_file() else None,
         "arquivos": auxiliares,
     }
