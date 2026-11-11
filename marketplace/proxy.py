@@ -55,7 +55,8 @@ def filtro_cookie(nome_cookie: str) -> str:
     return f"(^|; *){nome_cookie}=[^;]*;? *"
 
 
-def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "portal_sessao") -> str:
+def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "portal_sessao",
+          extras: list[str] | None = None) -> str:
     """Monta o Caddyfile. A saida e deterministica (mesma entrada, mesmo texto)."""
     porta_portal = portal_upstream.rsplit(":", 1)[-1] if ":" in portal_upstream else "8000"
     pagina = _PAGINA_FORA_DO_AR.replace("PORTA_PORTAL", porta_portal)
@@ -86,14 +87,42 @@ def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "p
         "}",
     ]
     for sol in sorted(solucoes, key=lambda s: s.porta_host):
-        upstream = f"{sol.container}:{sol.porta_container}"
+        upstream = sol.externo or f"{sol.container}:{sol.porta_container}"
         linhas += ["", f"# {_comentario(sol.nome)}", f":{sol.porta_host} {{"]
         if not sol.caminhos_publicos:
             linhas.append(f"\timport solucao {sol.id} {upstream}")
         else:
             linhas += _bloco_com_publicos(sol, upstream, portal_upstream, cookie_portal, pagina)
         linhas.append("}")
+    for bloco in extras or []:
+        linhas += ["", bloco.rstrip("\n")]
     return "\n".join(linhas) + "\n"
+
+
+# Caminhos da API do Supabase que os sistemas usam pelo navegador (dados, login e arquivos).
+CAMINHOS_API_SUPABASE = ("/rest/v1/*", "/auth/v1/*", "/storage/v1/*")
+
+
+def bloco_api_supabase(porta: int, upstream: str, cookie_portal: str = "portal_sessao") -> str:
+    """Porta da API do Supabase (deploy/supabase). Sem login do portal: quem protege os dados sao
+    as chaves e as regras (RLS) do proprio Supabase, como na nuvem. So os caminhos da API passam;
+    o painel (Studio) fica so na porta dele, atras do login do portal."""
+    filtro = f'\t\t\theader_up Cookie "{filtro_cookie(cookie_portal)}" "$1"'
+    return "\n".join([
+        "# API do Supabase do servidor (PORTAL_SUPABASE=sim; ver deploy/supabase)",
+        f":{porta} {{",
+        f"\t@api path {' '.join(CAMINHOS_API_SUPABASE)}",
+        "\thandle @api {",
+        f"\t\treverse_proxy {upstream} {{",
+        "\t\t\theader_up -X-Portal-Usuario",
+        filtro,
+        "\t\t}",
+        "\t}",
+        "\thandle {",
+        '\t\trespond "API do Supabase: use /rest/v1, /auth/v1 ou /storage/v1. O painel fica em outra porta, no portal." 404',
+        "\t}",
+        "}",
+    ])
 
 
 def _bloco_com_publicos(sol: Solucao, upstream: str, portal_upstream: str, cookie: str,
@@ -177,3 +206,14 @@ def _resumo(saida: str) -> str:
     linhas = [l for l in saida.splitlines() if l.strip()]
     erros = [l for l in linhas if "error" in l.lower()] or linhas
     return (erros[-1] if erros else "sem detalhes")[:400]
+
+
+def extras(cfg, solucoes: dict[str, Solucao]) -> list[str]:
+    """Blocos que nao vem de manifesto: hoje, a API do Supabase quando PORTAL_SUPABASE=sim."""
+    if not cfg.supabase_ativo:
+        return []
+    usada = next((s.id for s in solucoes.values() if s.porta_host == cfg.supabase_porta_api), None)
+    if usada:
+        print(f"[caddy] porta {cfg.supabase_porta_api} da API do Supabase ja e de '{usada}'; API nao publicada", flush=True)
+        return []
+    return [bloco_api_supabase(cfg.supabase_porta_api, cfg.supabase_gateway)]

@@ -137,6 +137,13 @@ if ! curl -fsS -o /dev/null "http://127.0.0.1:8000/" 2>/dev/null; then
   exit 1
 fi
 
+# ---------- 3b. Supabase do servidor (opcional) ----------
+if grep -qiE '^PORTAL_SUPABASE=(sim|true|1|yes|on)\s*$' .env; then
+  bash deploy/supabase/subir.sh
+elif "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q '^log20-supabase-'; then
+  aviso "O Supabase do servidor esta rodando, mas PORTAL_SUPABASE nao esta como sim no .env: ele nao foi atualizado."
+fi
+
 # ---------- 4. solucoes ----------
 azul "Instalando e iniciando as solucoes"
 set +e

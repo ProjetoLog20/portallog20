@@ -254,6 +254,35 @@ ou a do usuário de uma solução, que só enxerga o próprio banco).
 Remover uma solução do portal não apaga o banco dela. Para apagar (irreversível):
 `sudo docker compose exec postgres psql -U postgres -c 'DROP DATABASE jornada_lideranca'`.
 
+## Supabase do servidor (opcional)
+
+Para sistemas feitos sobre o Supabase (ex.: Panorama), o portal pode subir um Supabase próprio na
+VM, em `deploy/supabase/`: banco (PostgreSQL 17 do Supabase), login, API de dados, arquivos, o
+painel Studio e o gateway. As versões são as do compose oficial (commit em
+`deploy/supabase/ORIGEM-COMMIT`), sem realtime, edge functions, logs e pooler.
+
+**Ligar:** no `.env`, `PORTAL_SUPABASE=sim`, e `bash deploy/atualizar.sh`. Na primeira vez
+`deploy/supabase/subir.sh` gera no `.env` os segredos (senha do banco, `SUPABASE_JWT_SECRET`, as
+chaves `SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY` assinadas com ele, usuário e senha do
+painel) e **nunca mais os troca** (trocar o segredo derruba os logins e invalida as chaves gravadas
+nos sites). O endereço da API acompanha o `PORTAL_URL_BASE` (troca de IP). A primeira subida baixa
+as imagens (alguns minutos) e a pilha usa de 1,5 a 3 GB de memória.
+
+| Porta | O quê | Acesso |
+| --- | --- | --- |
+| **8111** (`PORTAL_SUPABASE_PORTA_API`) | API para os sistemas: `/rest/v1`, `/auth/v1`, `/storage/v1` | Sem login do portal: as chaves e as regras (RLS) do Supabase protegem os dados, como na nuvem. Os outros caminhos (o painel) respondem 404. |
+| **8112** | **Supabase Studio** (solução do catálogo, "gerenciada pelo servidor") | Login do portal + liberação em **Acessos** + usuário do painel (`SUPABASE_PAINEL_USUARIO`, padrão `supabaselog`; senha em `SUPABASE_PAINEL_SENHA` no `.env`). Dá acesso total ao banco: só administradores. |
+
+Os dados ficam nos volumes `log20-supabase-dados` e `log20-supabase-arquivos`; rodar de novo nunca
+apaga nada. Os containers aparecem na tela **Uso**. Soluções com `[execucao] externo =
+"container:porta"` (como o Studio) não são construídas nem iniciadas pelo portal: ele só publica a
+porta, controla o acesso e mostra se está no ar; `requer = "supabase"` esconde a solução quando o
+Supabase está desligado. Login sem e-mail: cadastro ligado com confirmação automática (o Panorama
+cria usuários pela tela dele); `SUPABASE_SMTP_*` no `.env` liga o envio de e-mail.
+
+**Ainda não incluído** (próximas etapas): o banco do Supabase no backup diário, preencher sozinho
+`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` dos sistemas e copiar os dados do Supabase da nuvem.
+
 ## Variáveis na construção (sites Vite, React, Next)
 
 Num site Vite/React/Vue servido como arquivos, as variáveis **não são lidas quando o site está no

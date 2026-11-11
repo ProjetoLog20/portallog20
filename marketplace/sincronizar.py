@@ -82,14 +82,16 @@ def executar(atualizar: bool = False, reiniciar: bool = False, incluir_paradas: 
         solucoes = {k: v for k, v in solucoes.items() if k in somente}
 
     if cfg.caddy_container:
-        r = proxy.aplicar(proxy.gerar(list(solucoes.values()), cfg.portal_upstream), cfg.caddy_pasta,
-                          cfg.caddy_container)
+        r = proxy.aplicar(proxy.gerar(list(solucoes.values()), cfg.portal_upstream, extras=proxy.extras(cfg, solucoes)),
+                          cfg.caddy_pasta, cfg.caddy_container)
         print(f"[caddy] {r.mensagem}")
 
     ger = Gerenciador(solucoes, Armazenamento(cfg.pasta_dados), cfg)
     resultados: list[tuple[str, str, str]] = []
     imagens_feitas: set[str] = set()
     for sol in sorted(solucoes.values(), key=lambda s: s.porta_host):
+        if sol.externo:
+            continue  # sobe por fora do portal (ex.: deploy/supabase)
         estado = ger.status(sol)["estado"]
         acao = _acao(estado, atualizar, reiniciar, incluir_paradas)
         # Solucoes que dividem a imagem (ex.: principal + homologacao): constroi uma vez so.

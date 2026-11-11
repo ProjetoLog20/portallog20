@@ -6,6 +6,7 @@ Para publicar uma nova solucao no portal basta criar
 
 from __future__ import annotations
 
+import os
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -110,6 +111,12 @@ class Solucao:
     caminhos_publicos: list[str] = field(default_factory=list)
     # Dockerfile guardado com o manifesto (gerado pelo assistente), usado no lugar do do repositorio.
     dockerfile_portal: Path | None = None
+    # [execucao] externo = "host:porta": servico que o servidor sobe por fora do portal (ex.: o
+    # Supabase em deploy/supabase). O portal so publica a porta, controla o acesso e mostra o
+    # estado; nao constroi, nao inicia nem para.
+    externo: str = ""
+    # requer = "supabase": a solucao so entra no catalogo quando PORTAL_SUPABASE=sim no .env.
+    requer: str = ""
     # [build] variaveis_na_construcao = true: site estatico (Vite/React...). Nada le variavel quando
     # o site roda, entao TODAS as variaveis (fixas e configuracoes) vao para a construcao.
     variaveis_na_construcao: bool = False
@@ -156,8 +163,11 @@ def carregar_manifesto(caminho: Path) -> Solucao:
     if not ID_RE.match(sid):
         raise ManifestoInvalido(f"{caminho}: id '{sid}' deve usar letras minusculas, numeros e hifens")
 
-    build = _exigir(dados, "build", caminho)
     execucao = _exigir(dados, "execucao", caminho)
+    servico_externo = str(execucao.get("externo", "")).strip()
+    if servico_externo and not re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,62}:\d{1,5}", servico_externo):
+        raise ManifestoInvalido(f"{caminho}: externo deve ser 'container:porta' (ex.: log20-supabase-gw:8000)")
+    build = dados.get("build", {}) if servico_externo else _exigir(dados, "build", caminho)
 
     repositorio = str(build.get("repositorio", "")).strip()
     ref = str(build.get("ref", "main")).strip()
@@ -172,6 +182,8 @@ def carregar_manifesto(caminho: Path) -> Solucao:
             raise ManifestoInvalido(f"{caminho}: ref '{ref}' invalido (use o nome de um branch ou tag)")
         if Path(subpasta).is_absolute() or ".." in Path(subpasta).parts:
             raise ManifestoInvalido(f"{caminho}: subpasta deve ser um caminho dentro do repositorio")
+        contexto = None
+    elif servico_externo:
         contexto = None
     else:
         contexto = (base / _exigir(build, "contexto", caminho)).resolve()
@@ -282,7 +294,8 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         contexto_build=contexto,
         dockerfile_nome=dockerfile_nome,
         imagem=str(build.get("imagem", f"log20/{sid}:local")),
-        porta_container=int(_exigir(execucao, "porta_container", caminho)),
+        porta_container=int(execucao.get("porta_container") or servico_externo.rsplit(":", 1)[-1]) if servico_externo
+        else int(_exigir(execucao, "porta_container", caminho)),
         porta_host=int(_exigir(execucao, "porta_host", caminho)),
         caminho_saude=str(execucao.get("caminho_saude", "/")),
         caminho_abrir=str(execucao.get("caminho_abrir", "/")),
@@ -298,6 +311,8 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         manifesto=caminho,
         logo=logo,
         repositorio=repositorio,
+        externo=servico_externo,
+        requer=str(dados.get("requer", "")).strip().lower(),
         ref=ref if repositorio else "",
         subpasta=subpasta,
         caminhos_publicos=list(publicos),
@@ -310,6 +325,12 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         recursos_memoria_mb=rec_mem,
         recursos_cpus=rec_cpus,
     )
+
+
+def _ligado(recurso: str) -> bool:
+    """PORTAL_<RECURSO>=sim no ambiente (ex.: PORTAL_SUPABASE)."""
+    valor = os.environ.get(f"PORTAL_{recurso.upper()}", "").strip().lower()
+    return valor in {"1", "sim", "true", "yes", "on"}
 
 
 def carregar_catalogo(pasta: Path, pasta_local: Path | None = None) -> tuple[dict[str, Solucao], list[str]]:
@@ -331,6 +352,8 @@ def carregar_catalogo(pasta: Path, pasta_local: Path | None = None) -> tuple[dic
             erros.append(str(exc))
             continue
         sol.local = local
+        if sol.requer and not _ligado(sol.requer):
+            continue  # recurso do servidor desligado (ex.: PORTAL_SUPABASE): a solucao nao aparece
         if sol.id in solucoes:
             if local:
                 erros.append(f"{caminho}: a solucao '{sol.id}' ja esta no repositorio do portal; "

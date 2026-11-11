@@ -214,6 +214,8 @@ class Gerenciador:
         return self.armazenamento.url_publica(sol.id) or f"{self.config.url_base}:{sol.porta_host}"
 
     def url_interna(self, sol: Solucao) -> str:
+        if sol.externo:
+            return f"http://{sol.externo}"
         if self.config.rede_docker and not self.config.publicar_portas:
             # Portal e solucao na mesma rede do Docker: fala direto com o container.
             return f"http://{sol.container}:{sol.porta_container}"
@@ -247,6 +249,10 @@ class Gerenciador:
 
     # ---------- status ----------
     def status(self, sol: Solucao) -> dict:
+        if sol.externo:  # sobe por fora do portal (ex.: deploy/supabase): so conferimos se responde
+            if self._responde(sol):
+                return {"estado": "rodando", "detalhe": "No ar (gerenciado pelo servidor)"}
+            return {"estado": "com_problema", "detalhe": "Fora do ar: rode deploy/atualizar.sh no servidor"}
         tarefa = self.tarefas.get(sol.id)
         if tarefa and tarefa.estado == "executando":
             return {"estado": "ocupado", "detalhe": tarefa.etapa or tarefa.acao}
@@ -292,6 +298,8 @@ class Gerenciador:
     def executar(self, sol: Solucao, acao: str) -> Tarefa:
         if acao not in ACOES:
             raise ValueError(f"Acao invalida: {acao}")
+        if sol.externo:
+            raise RuntimeError("Esta solucao e gerenciada pelo servidor (deploy/atualizar.sh), nao pelo portal.")
         with self._lock:
             atual = self.tarefas.get(sol.id)
             if atual and atual.estado == "executando":

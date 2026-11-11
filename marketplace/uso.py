@@ -28,7 +28,12 @@ from . import docker_cli
 from .config import RAIZ, Config
 from .manager import Gerenciador
 
-INFRA = {"log20-portal": "Portal", "log20-caddy": "Proxy (Caddy)", "log20-postgres": "PostgreSQL do servidor"}
+INFRA = {"log20-portal": "Portal", "log20-caddy": "Proxy (Caddy)", "log20-postgres": "PostgreSQL do servidor",
+         # Supabase do servidor (deploy/supabase), quando ligado
+         "log20-supabase-db": "Supabase: banco", "log20-supabase-auth": "Supabase: login",
+         "log20-supabase-rest": "Supabase: API de dados", "log20-supabase-storage": "Supabase: arquivos",
+         "log20-supabase-meta": "Supabase: meta", "log20-supabase-studio": "Supabase: Studio",
+         "log20-supabase-gw": "Supabase: gateway"}
 VOLUME_POSTGRES = "log20-postgres-dados"
 TAMANHOS_A_CADA = 15 * 60
 

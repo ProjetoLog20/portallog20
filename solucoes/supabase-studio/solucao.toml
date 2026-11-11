@@ -1,0 +1,26 @@
+# Painel do Supabase do servidor (deploy/supabase). So aparece com PORTAL_SUPABASE=sim no .env.
+# O portal nao constroi nem inicia este servico (quem sobe e o deploy/atualizar.sh): ele so publica
+# a porta, pede o login do portal, controla quem acessa (tela Acessos) e mostra se esta no ar.
+# Depois do login do portal, o painel pede o usuario e a senha dele (SUPABASE_PAINEL_* no .env).
+
+id = "supabase-studio"
+nome = "Supabase Studio"
+resumo = "Painel do Supabase do servidor: tabelas, usuarios do login, arquivos e SQL."
+categoria = "Infraestrutura"
+versao = "1.0.0"
+responsavel = "Administradores do portal"
+tags = ["banco", "supabase", "administracao"]
+requer = "supabase"
+descricao = """
+Painel de administracao do Supabase que roda neste servidor, usado por sistemas feitos sobre o
+Supabase (como o Panorama). Da acesso total ao banco: libere so para administradores.
+
+A API que os sistemas usam fica em outra porta (8111, PORTAL_SUPABASE_PORTA_API) e nao passa
+por aqui.
+"""
+
+[execucao]
+externo = "log20-supabase-gw:8000"
+porta_host = 8112
+caminho_saude = "/"
+caminho_abrir = "/"

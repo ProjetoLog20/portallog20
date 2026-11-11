@@ -57,7 +57,8 @@ def _atualizar_proxy(solucoes) -> dict | None:
     if not CFG.caddy_container:
         return None
     try:
-        r = proxy.aplicar(proxy.gerar(solucoes, CFG.portal_upstream, COOKIE), CFG.caddy_pasta, CFG.caddy_container)
+        extras = proxy.extras(CFG, {s.id: s for s in solucoes})
+        r = proxy.aplicar(proxy.gerar(solucoes, CFG.portal_upstream, COOKIE, extras), CFG.caddy_pasta, CFG.caddy_container)
     except Exception as exc:  # noqa: BLE001 - o portal continua no ar mesmo se o Caddy falhar
         r = proxy.Resultado(False, f"Falha ao atualizar o Caddy: {exc}", erro=True)
     print(f"[caddy] {r.mensagem}", flush=True)
@@ -323,6 +324,7 @@ def _resumo(sol: Solucao, docker_ok: bool) -> dict:
         "logo": _logo_url(sol),
         "status": status,
         "local": sol.local,
+        "externo": bool(sol.externo),
     }
 
 
@@ -370,6 +372,7 @@ def api_detalhe(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
                   if b else None)(ger().armazenamento.banco(sol.id)) if sol.banco else None,
         "url_padrao": f"{CFG.url_base}:{sol.porta_host}",
         "campos_banco": sorted(sol.banco) if sol.banco else [],
+        "externo": bool(sol.externo),
         "local": sol.local,
         "dockerfile_portal": bool(sol.dockerfile_portal),
         "acessos_demo": [vars(a) for a in sol.acessos_demo],
@@ -942,6 +945,8 @@ def api_uso(horas: float = 24, _: Usuario = Depends(exigir_admin)) -> dict:
     picos = hist.pop("picos_24h")
     alvos = []
     for sol in sorted(ger().solucoes.values(), key=lambda s: s.nome.lower()):
+        if sol.externo:
+            continue  # sem container proprio (ex.: Supabase Studio): os containers aparecem como infraestrutura
         c = atual["conteineres"].get(sol.id) or {}
         lim = ger().limites(sol)
         guardado = ger().armazenamento.banco(sol.id) or {}
@@ -963,6 +968,8 @@ def api_uso(horas: float = 24, _: Usuario = Depends(exigir_admin)) -> dict:
                       "imagem": tam["imagens"].get(imagem, 0)},
         })
     for nome, rotulo in INFRA.items():
+        if nome.startswith("log20-supabase-") and not CFG.supabase_ativo and nome not in atual["conteineres"]:
+            continue
         c = atual["conteineres"].get(nome) or {}
         pico = picos.get(nome) or {}
         alvos.append({"id": nome, "nome": rotulo, "tipo": "infra", "rodando": nome in atual["conteineres"],

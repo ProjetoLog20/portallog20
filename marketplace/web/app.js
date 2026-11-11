@@ -413,6 +413,12 @@ function botoesAcao(sol, aoAgir, soPrincipal = false) {
       h("span", { class: "giro", "aria-hidden": "true" }), h("span", {}, "Aguarde…")));
     return caixa;
   }
+  if (sol.externo) {
+    // Sobe por fora do portal (ex.: Supabase em deploy/supabase): só dá para abrir.
+    if (sol.status.estado === "rodando") caixa.append(h("a", { class: "botao primario", href: sol.url, target: "_blank", rel: "noopener" }, "Abrir"));
+    else if (!soPrincipal) caixa.append(h("span", { class: "nota" }, "Gerenciado pelo servidor: rode deploy/atualizar.sh na VM."));
+    return caixa;
+  }
   const acoes = ACOES_POR_ESTADO[sol.status.estado] || [];
   for (const [acao, rotulo, estilo] of soPrincipal ? acoes.slice(0, 1) : acoes) {
     const cls = `botao ${estilo || ""}`.trim();

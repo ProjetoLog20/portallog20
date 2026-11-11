@@ -76,7 +76,7 @@ def validar(_: argparse.Namespace) -> int:
         print(f"AVISO  {msg}")
     print(f"\n{len(solucoes)} solucao(oes) lida(s), {len(erros)} erro(s), {len(avisos)} aviso(s).")
     for sol in sorted(solucoes.values(), key=lambda s: s.porta_host):
-        origem = f"{sol.repositorio} ({sol.ref})" if sol.repositorio else str(sol.contexto_build)
+        origem = (f"{sol.repositorio} ({sol.ref})" if sol.repositorio else f"gerenciado pelo servidor: {sol.externo}" if sol.externo else str(sol.contexto_build))
         print(f"  {sol.porta_host}  {sol.id:<34} {origem}")
     return 1 if erros else 0
 
@@ -215,6 +215,19 @@ def cmd_restaurar(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_supabase(args: argparse.Namespace) -> int:
+    from . import supabase
+
+    env = config_mod.RAIZ / ".env"
+    if args.acao == "preparar":
+        mudou = supabase.preparar(env, int(os.environ.get("PORTAL_SUPABASE_PORTA_API", "") or 8111))
+        print("Supabase: .env " + (f"atualizado ({', '.join(mudou)})" if mudou else "ja estava pronto"))
+    problemas = supabase.conferir_chaves(env)
+    for p in problemas:
+        print(f"ERRO: {p}", file=sys.stderr)
+    return 1 if problemas else 0
+
+
 def servir(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -277,8 +290,11 @@ def main() -> None:
     p_res.add_argument("--sem-banco", action="store_true", help="Nao restaura o banco")
     p_res.add_argument("--sem-arquivos", action="store_true", help="Nao restaura os volumes")
     p_res.add_argument("--sim", action="store_true", help="Nao pede confirmacao")
+    p_sup = sub.add_parser("supabase", help="Supabase do servidor (deploy/supabase)")
+    p_sup.add_argument("acao", choices=["preparar", "conferir"],
+                       help="preparar: gera os segredos que faltam no .env; conferir: so confere as chaves")
     args = parser.parse_args()
-    comandos = {"backup": cmd_backup, "backups": cmd_backups, "verificar-backup": cmd_verificar,
+    comandos = {"supabase": cmd_supabase, "backup": cmd_backup, "backups": cmd_backups, "verificar-backup": cmd_verificar,
                 "restaurar": cmd_restaurar}
     if args.comando in comandos:
         sys.exit(comandos[args.comando](args))

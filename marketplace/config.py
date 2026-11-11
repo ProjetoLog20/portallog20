@@ -62,6 +62,10 @@ class Config:
     # Painel de uso: intervalo da coleta e quantos dias de historico guardar.
     uso_intervalo_s: int = 60
     uso_dias: int = 7
+    # Supabase do servidor (deploy/supabase): ligado por PORTAL_SUPABASE=sim; porta da API.
+    supabase_ativo: bool = False
+    supabase_porta_api: int = 8111
+    supabase_gateway: str = "log20-supabase-gw:8000"
 
     @property
     def pasta_solucoes_locais(self) -> Path:
@@ -114,6 +118,8 @@ def carregar() -> Config:
         limite_processos=int(os.environ.get("PORTAL_LIMITE_PROCESSOS", "").strip() or 1024),
         uso_intervalo_s=max(15, int(os.environ.get("PORTAL_USO_INTERVALO", "").strip() or 60)),
         uso_dias=max(1, int(os.environ.get("PORTAL_USO_DIAS", "").strip() or 7)),
+        supabase_ativo=os.environ.get("PORTAL_SUPABASE", "").strip().lower() in {"1", "sim", "true", "yes", "on"},
+        supabase_porta_api=int(os.environ.get("PORTAL_SUPABASE_PORTA_API", "").strip() or 8111),
     )
 
 
