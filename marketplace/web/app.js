@@ -575,6 +575,8 @@ async function telaSolucao(id) {
           h("button", { type: "button", class: "botao pequeno perigo", onclick: () => removerLocal(sol) }, "Remover do catálogo")))
     : null;
 
+  const blocoSupabase = sol.supabase ? blocoSupabaseDetalhe(sol) : null;
+
   const demo = sol.acessos_demo.length
     ? h("div", { class: "bloco" },
         h("h3", {}, "Acessos de demonstração"),
@@ -606,7 +608,7 @@ async function telaSolucao(id) {
   const paineis = {
     geral: h("div", { class: "aba-painel colunas" },
       h("section", { class: "painel" }, h("h2", {}, "Sobre"), h("p", { class: "descricao" }, sol.descricao || sol.resumo), demo),
-      h("section", { class: "painel" }, h("h2", {}, "Ficha técnica"), ficha, blocoLocal)),
+      h("section", { class: "painel" }, h("h2", {}, "Ficha técnica"), ficha, blocoSupabase, blocoLocal)),
     config: h("div", { class: "aba-painel" },
       h("section", { class: "painel estreito" }, h("h2", {}, "Configurações"),
         h("p", { class: "nota acima" }, "Viram variáveis de ambiente da solução. As mudanças valem depois de Reiniciar."), formConfig)),
@@ -648,6 +650,42 @@ async function telaSolucao(id) {
   await atualizarLogs(id);
 }
 
+/** Bloco "Supabase do sistema" (visão geral): situação da pilha, variáveis e o Studio. */
+function blocoSupabaseDetalhe(sol) {
+  const sb = sol.supabase;
+  const est = sb.estado;
+  const partes = est ? h("ul", { class: "lista-partes" }, est.partes.map((p) =>
+    h("li", { "data-situacao": p.situacao === "no ar" ? "ok" : p.situacao === "nao criado" ? "vazio" : "alerta" },
+      h("span", {}, p.rotulo), h("small", {}, p.situacao === "nao criado" ? "não criado" : p.situacao)))) : null;
+  const botaoStudio = sb.studio && est?.no_ar ? h("button", {
+    type: "button", class: "botao pequeno",
+    onclick: async (ev) => {
+      const b = ev.currentTarget;
+      // Abre a aba já no clique (senão o navegador bloqueia) e manda para o Studio quando ele responder.
+      const janela = window.open("about:blank", "_blank");
+      b.disabled = true;
+      const texto = b.textContent;
+      b.textContent = "Abrindo o Studio…";
+      try {
+        const r = await api(`/api/solucoes/${sol.id}/supabase/studio`, { method: "POST" });
+        if (janela) janela.location = r.url; else window.open(r.url, "_blank", "noopener");
+      } catch (e) { janela?.close(); toast(e.message, "erro"); }
+      b.disabled = false;
+      b.textContent = texto;
+    },
+  }, est.studio_neste ? "Abrir o Studio" : "Abrir o Studio deste sistema") : null;
+  return h("div", { class: "bloco bloco-supabase" },
+    h("h3", {}, "Supabase do sistema"),
+    h("p", { class: "nota" }, "Banco, login e arquivos só deste sistema, no mesmo endereço dele (/rest/v1, /auth/v1 e /storage/v1), "
+      + "atrás do login do portal. O portal preenche sozinho:"),
+    h("ul", { class: "lista-variaveis" }, sb.variaveis.map((v) => h("li", {}, h("code", {}, v.nome), h("span", {}, v.conteudo)))),
+    est && !est.criado ? h("p", { class: "nota" }, "Ainda não criado: é criado no primeiro Iniciar (baixa as imagens; leva alguns minutos).") : partes,
+    est?.criado && !est.no_ar ? h("p", { class: "nota" }, "Fora do ar: clique em Reiniciar na solução.") : null,
+    h("p", { class: "nota" }, "Os dados ficam nos volumes ", h("code", {}, `log20-sb-${sol.id}-*`), ": reiniciar, atualizar ou remover o container não os apaga."),
+    botaoStudio ? h("div", { class: "linha-botoes topo-8" }, botaoStudio) : null,
+    sb.studio && !est?.no_ar ? h("p", { class: "nota" }, "O Studio (painel do banco) abre quando o Supabase estiver no ar.") : null);
+}
+
 function mostrarAba(k) {
   abaSolucao = k;
   for (const b of $conteudo.querySelectorAll(".abas > button")) b.setAttribute("aria-selected", String(b.id === `aba-${k}`));
@@ -683,6 +721,13 @@ function montarFormulario(form, sol) {
   }
   for (const c of sol.configuracoes) {
     const idCampo = `cfg-${c.nome}`;
+    if (c.gerenciada) {
+      form.append(h("div", { class: "campo" },
+        h("label", { for: idCampo }, c.rotulo, h("span", { class: "etiqueta" }, "Preenchido pelo portal")),
+        h("input", { id: idCampo, type: "text", disabled: true, value: "", placeholder: "Vem do Supabase do sistema (Visão geral)" }),
+        h("small", {}, "O portal preenche este valor com o Supabase próprio da solução; não precisa digitar.")));
+      continue;
+    }
     const limpar = c.tipo === "segredo" && c.definido
       ? h("button", {
           type: "button", class: "link-limpar",
@@ -731,6 +776,7 @@ function montarFormulario(form, sol) {
     // (ex.: o portal preencheu o banco ao iniciar) não apaga os valores gravados depois.
     const valores = {};
     for (const c of sol.configuracoes) {
+      if (c.gerenciada) continue;
       const input = form.elements[c.nome];
       if (c.tipo === "booleano") { if (input.checked !== (c.valor === "true")) valores[c.nome] = input.checked; }
       else if (c.tipo === "segredo") { if (input.value) valores[c.nome] = input.value; }
@@ -1457,6 +1503,7 @@ function valoresDaAnalise(an) {
     ambiente: { ...an.ambiente }, volumes: { ...an.volumes }, segredos: [...an.segredos],
     configuracoes: an.configuracoes.map((c) => ({ ...c, incluir: true })),
     banco: an.banco, usar_banco: !!an.banco,
+    supabase: an.supabase, usar_supabase: !!an.supabase,
     tem_dockerfile: an.tem_dockerfile, dockerfile: an.dockerfile, arquivos: { ...(an.arquivos || {}) },
     variaveis_na_construcao: an.tecnologia === "spa",
   };
@@ -1532,6 +1579,22 @@ function formularioSolucao(v, { modo, aoSalvar }) {
     h("span", {}, h("strong", {}, "Usar o banco PostgreSQL do servidor"),
       h("small", {}, ` O projeto lê ${Object.keys(v.banco).join(", ")}: o portal cria um banco só para ele e preenche a conexão.`))) : null;
 
+  const sbv = v.supabase || {};
+  const campoSb = (campo, rotulo, ajuda) => h("div", { class: "campo" },
+    h("label", { for: `ns-sb-${campo}` }, rotulo),
+    h("input", { id: `ns-sb-${campo}`, type: "text", value: sbv[campo] || "", spellcheck: false, class: "cfg-nome", placeholder: "não usa" }),
+    h("small", {}, ajuda));
+  const usarSupabase = v.supabase || v.usar_supabase ? h("div", { class: "grupo-supabase" },
+    h("label", { class: "campo-check" },
+      h("input", { type: "checkbox", id: "ns-supabase", checked: !!v.usar_supabase }),
+      h("span", {}, h("strong", {}, "Criar um Supabase só para este sistema"),
+        h("small", {}, " Banco, login e arquivos próprios, no servidor, no mesmo endereço do sistema. O portal preenche as variáveis abaixo sozinho; o banco começa vazio."))),
+    h("div", { class: "form-grade" },
+      campoSb("url", "Variável do endereço", "Recebe o endereço do sistema (ex.: VITE_SUPABASE_URL)."),
+      campoSb("chave_anon", "Variável da chave pública", "Recebe a chave anon (ex.: VITE_SUPABASE_ANON_KEY)."),
+      campoSb("chave_servico", "Chave de serviço (opcional)", "Só para código que roda no servidor; nunca num site estático.")))
+    : null;
+
   const form = h("form", { class: "config", id: "ns-form" },
     h("div", { class: "form-grade" },
       campo("ns-nome", "Nome", v.nome, { required: true, maxlength: 120 }),
@@ -1544,6 +1607,7 @@ function formularioSolucao(v, { modo, aoSalvar }) {
       campo("ns-porta", "Porta da aplicação", v.porta_container, { type: "number" }, "Onde o sistema escuta dentro do container."),
       campo("ns-saude", "Rota de saúde", v.caminho_saude, {}, "O portal testa esta rota para saber se está no ar.")),
     usarBanco,
+    usarSupabase,
     h("label", { class: "campo-check" },
       h("input", { type: "checkbox", id: "ns-construcao", checked: !!v.variaveis_na_construcao }),
       h("span", {}, h("strong", {}, "Site estático: todas as variáveis entram na construção"),
@@ -1585,6 +1649,11 @@ function formularioSolucao(v, { modo, aoSalvar }) {
       segredos: form["ns-segredos"].value.split(",").map((s) => s.trim()).filter(Boolean),
       configuracoes: tabela.valores().filter((c) => usar || !doBanco.includes(c.nome)),
       banco: v.banco, usar_banco: usar,
+      usar_supabase: !!form.querySelector("#ns-supabase")?.checked,
+      supabase: form.querySelector("#ns-supabase") ? {
+        url: form.querySelector("#ns-sb-url").value.trim(), chave_anon: form.querySelector("#ns-sb-chave_anon").value.trim(),
+        chave_servico: form.querySelector("#ns-sb-chave_servico").value.trim(), url_interna: sbv.url_interna || "",
+      } : null,
       dockerfile: dockerfile ? dockerfile.value : null,
       arquivos,
       variaveis_na_construcao: !!form.querySelector("#ns-construcao")?.checked,
@@ -2449,7 +2518,8 @@ function pintarTabelaUso() {
     const disco = sol ? a.disco.volumes + a.disco.banco + a.disco.imagem : null;
     return h("tr", { class: sol ? "" : "linha-infra" },
       h("th", { scope: "row" }, h("span", { class: "nome-sistema" }, a.nome),
-        sol ? h("div", { class: "sub" }, pilula(a.status.estado, a.status.detalhe)) : h("div", { class: "sub" }, "Infraestrutura do portal")),
+        sol ? h("div", { class: "sub" }, pilula(a.status.estado, a.status.detalhe))
+          : h("div", { class: "sub" }, a.id.startsWith("supabase:") ? "Banco, login e arquivos do sistema (6 containers)" : "Infraestrutura do portal")),
       h("td", {}, a.mem != null ? h("div", { class: "valor-uso" },
           h("strong", {}, bytesTexto(a.mem)), sol ? h("span", {}, ` de ${mbTexto(limMem)}`) : null) : h("span", { class: "sub" }, "Parado"),
         fracMem != null ? medidor(fracMem, { atencao: 0.8, critico: 0.9 }) : null,
@@ -2459,7 +2529,8 @@ function pintarTabelaUso() {
       h("td", { class: "num" }, a.pico_mem_24h ? bytesTexto(a.pico_mem_24h) : "—"),
       h("td", {}, a.cpu != null ? h("div", { class: "valor-uso" },
           h("strong", {}, a.cpu.toLocaleString("pt-BR", { maximumFractionDigits: 2 })), h("span", {}, sol ? ` de ${nucleos(a.limites.cpus)}` : " núcleo")) : "—"),
-      h("td", { class: "num" }, sol ? h("span", { title: `Banco ${bytesTexto(a.disco.banco)} · arquivos ${bytesTexto(a.disco.volumes)} · imagem ${bytesTexto(a.disco.imagem)}` }, bytesTexto(disco)) : "—"),
+      h("td", { class: "num" }, sol ? h("span", { title: `Banco ${bytesTexto(a.disco.banco)} · arquivos ${bytesTexto(a.disco.volumes)} · imagem ${bytesTexto(a.disco.imagem)}` }, bytesTexto(disco))
+        : a.disco ? h("span", { title: "Banco e arquivos do Supabase do sistema" }, bytesTexto(a.disco.volumes)) : "—"),
       h("td", { class: "acoes-backup" }, sol ? h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoLimites(a) }, "Limites") : null));
   });
   document.getElementById("uso-tabela").replaceChildren(h("div", { class: "tabela-rolagem" },

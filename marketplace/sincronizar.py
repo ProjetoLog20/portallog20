@@ -82,7 +82,7 @@ def executar(atualizar: bool = False, reiniciar: bool = False, incluir_paradas: 
         solucoes = {k: v for k, v in solucoes.items() if k in somente}
 
     if cfg.caddy_container:
-        r = proxy.aplicar(proxy.gerar(list(solucoes.values()), cfg.portal_upstream, extras=proxy.extras(cfg, solucoes)),
+        r = proxy.aplicar(proxy.gerar(list(solucoes.values()), cfg.portal_upstream),
                           cfg.caddy_pasta, cfg.caddy_container)
         print(f"[caddy] {r.mensagem}")
 
@@ -101,7 +101,7 @@ def executar(atualizar: bool = False, reiniciar: bool = False, incluir_paradas: 
             resultados.append((sol.id, ROTULOS_ESTADO.get(estado, estado), "sem mudanca"))
             continue
         valores = ger.armazenamento.configuracoes(sol)
-        faltando = [c.rotulo for c in sol.configuracoes if c.obrigatoria and not valores.get(c.nome)]
+        faltando = sol.faltando(valores)
         if faltando:
             resultados.append((sol.id, "falta configurar", f"preencha no portal: {', '.join(faltando)}"))
             continue

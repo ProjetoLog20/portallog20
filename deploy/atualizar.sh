@@ -13,7 +13,9 @@
 #      (so quando o .env usa um IP; com dominio, nao mexe);
 #   3. sobe portal + Caddy + PostgreSQL e recria o portal (carrega o codigo e o .env novos);
 #   4. instala e inicia as solucoes que faltam, reinicia as com problema e regera o Caddy.
-#      Se o IP mudou, reinicia tambem as que estao no ar. Solucoes paradas ficam paradas.
+#      Se o IP mudou, reinicia tambem as que estao no ar (sites que gravam o endereco na
+#      construcao, como os que usam o Supabase do servidor, sao reconstruidos sozinhos).
+#      Solucoes paradas ficam paradas.
 # Pode rodar quantas vezes quiser. Os bancos e volumes existentes nunca sao apagados nem recriados.
 
 set -euo pipefail
@@ -137,11 +139,15 @@ if ! curl -fsS -o /dev/null "http://127.0.0.1:8000/" 2>/dev/null; then
   exit 1
 fi
 
-# ---------- 3b. Supabase do servidor (opcional) ----------
-if grep -qiE '^PORTAL_SUPABASE=(sim|true|1|yes|on)\s*$' .env; then
-  bash deploy/supabase/subir.sh
-elif "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q '^log20-supabase-'; then
-  aviso "O Supabase do servidor esta rodando, mas PORTAL_SUPABASE nao esta como sim no .env: ele nao foi atualizado."
+# ---------- 3b. Supabase fixo da primeira versao ----------
+# Hoje cada solucao com [supabase] no manifesto ganha um Supabase proprio (log20-sb-<id>-*), criado
+# pelo portal no Iniciar. A pilha fixa antiga (log20-supabase-*) nao e mais atualizada nem usada.
+# O script nao a desliga sozinho: so avisa (os dados dela ficam nos volumes log20-supabase-*).
+if "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q '^log20-supabase-'; then
+  aviso "O Supabase fixo antigo (containers log20-supabase-*) ainda esta ligado e nao e mais usado:"
+  aviso "  cada sistema agora tem o seu (log20-sb-<id>-*). Para liberar a memoria dele, rode:"
+  aviso "  ${DOCKER[*]} stop \$(${DOCKER[*]} ps -q --filter name=^log20-supabase-)"
+  aviso "  Os dados dele continuam nos volumes log20-supabase-* ate voce apaga-los."
 fi
 
 # ---------- 4. solucoes ----------

@@ -178,6 +178,10 @@ def gerar_manifesto(d: dict, com_dockerfile: bool) -> str:
         linhas += ["", "# Banco no PostgreSQL do servidor, criado pelo portal na primeira instalacao.", "[banco]",
                    'tipo = "postgres"', "", "[banco.configuracoes]",
                    *[f"{_chave(k)} = {_s(v)}" for k, v in d["banco"].items()]]
+    if d.get("supabase"):
+        linhas += ["", "# Supabase proprio, criado pelo portal so para esta solucao (banco, login e arquivos).",
+                   "# O portal preenche estas variaveis: endereco (o mesmo do sistema) e chave publica.", "[supabase]",
+                   *[f"{k} = {_s(v)}" for k, v in d["supabase"].items() if v or k in ("url", "chave_anon")]]
     for c in d["configuracoes"]:
         linhas += ["", "[[configuracoes]]", f"nome = {_s(c['nome'])}", f"rotulo = {_s(c.get('rotulo') or c['nome'])}",
                    f"tipo = {_s(c.get('tipo') or 'texto')}"]
@@ -259,6 +263,29 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao], editando: str | 
             if k not in nomes_conf:
                 configuracoes.append({"nome": k, "rotulo": f"Banco: {k}", "tipo": "segredo" if "SENHA" in k or "PASSWORD" in k
                                       or k.endswith("URL") else "texto", "ajuda": "Preenchido pelo portal com o banco do servidor."})
+    supabase = None
+    if not d.get("usar_supabase") and d.get("supabase"):
+        # Sem o Supabase do servidor: o endereco e a chave voltam a ser configuracoes a preencher.
+        for campo in ("url", "chave_anon"):
+            nome_v = str((d["supabase"] or {}).get(campo) or "").strip()
+            if VAR_RE.match(nome_v) and nome_v not in vistos:
+                vistos.add(nome_v)
+                configuracoes.append({"nome": nome_v, "rotulo": nome_v, "tipo": "texto", "padrao": "",
+                                      "ajuda": "Endereço ou chave do Supabase que o sistema usa.", "obrigatoria": True,
+                                      "construcao": True})
+    if d.get("usar_supabase") and d.get("supabase"):
+        supabase = {}
+        for campo in ("url", "chave_anon", "url_interna", "chave_servico"):
+            nome_v = str((d["supabase"] or {}).get(campo) or "").strip()
+            if nome_v and not VAR_RE.match(nome_v):
+                raise ErroAssistente(f"Supabase: nome de variável inválido: {nome_v}")
+            supabase[campo] = nome_v
+        if not supabase["url"] and not supabase["chave_anon"] and not supabase["url_interna"]:
+            raise ErroAssistente("Supabase: informe ao menos a variável que recebe o endereço.")
+        # O portal preenche estas: nao viram configuracao para o administrador.
+        configuracoes = [c for c in configuracoes if c["nome"] not in set(supabase.values())]
+        for nome_v in supabase.values():
+            ambiente.pop(nome_v, None)
     arquivos = {}
     for arq, conteudo in (d.get("arquivos") or {}).items():
         if not re.fullmatch(r"[A-Za-z0-9][\w.-]{0,60}", str(arq)) or arq in {"solucao.toml", "Dockerfile", "Dockerfile.dockerignore"}:
@@ -278,7 +305,7 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao], editando: str | 
             "responsavel": " ".join(str(d.get("responsavel") or "LOG20").split())[:80],
             "tecnologia": str(d.get("tecnologia") or "")[:80], "repositorio": repositorio, "ref": ref, "subpasta": subpasta,
             "porta_container": porta_c, "porta_host": porta_h, "caminho_saude": saude, "ambiente": ambiente,
-            "volumes": volumes, "segredos": segredos, "configuracoes": configuracoes, "banco": banco,
+            "volumes": volumes, "segredos": segredos, "configuracoes": configuracoes, "banco": banco, "supabase": supabase,
             "dockerfile": dockerfile, "arquivos": arquivos if dockerfile else {},
             "variaveis_na_construcao": bool(d.get("variaveis_na_construcao"))}
 
@@ -357,6 +384,7 @@ def para_edicao(cfg: Config, sol: Solucao) -> dict:
         "configuracoes": [{"nome": c.nome, "rotulo": c.rotulo, "tipo": c.tipo, "padrao": c.padrao, "ajuda": c.ajuda,
                            "obrigatoria": c.obrigatoria, "construcao": c.na_construcao} for c in sol.configuracoes],
         "banco": dict(sol.banco) if sol.banco else None, "usar_banco": bool(sol.banco),
+        "supabase": dict(sol.supabase) if sol.supabase else None, "usar_supabase": bool(sol.supabase),
         "variaveis_na_construcao": sol.variaveis_na_construcao,
         "tem_dockerfile": not df.is_file(), "dockerfile": df.read_text(encoding="utf-8") if df.is_file() else None,
         "arquivos": auxiliares,

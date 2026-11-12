@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
@@ -16,6 +17,7 @@ from urllib.parse import urlparse
 
 from . import banco as banco_pg
 from . import docker_cli, fontes
+from . import supabase as sb
 from .catalog import VARS_PUBLICAS_BUILD, Solucao
 from .config import Config
 
@@ -104,6 +106,16 @@ class Armazenamento:
         with self._lock:
             dados = self.ler(sid)
             dados["versao_codigo"] = versao
+            self.gravar(sid, dados)
+
+    def construcao(self, sid: str) -> str:
+        """Resumo das variaveis usadas na ultima construcao da imagem ('' = desconhecido)."""
+        return str(self.ler(sid).get("construcao") or "")
+
+    def registrar_construcao(self, sid: str, resumo: str) -> None:
+        with self._lock:
+            dados = self.ler(sid)
+            dados["construcao"] = resumo
             self.gravar(sid, dados)
 
     def url_publica(self, sid: str) -> str:
@@ -221,6 +233,30 @@ class Gerenciador:
             return f"http://{sol.container}:{sol.porta_container}"
         return f"http://{self.config.host_interno}:{sol.porta_host}"
 
+    # ---------- Supabase da solucao ----------
+    def variaveis_supabase(self, sol: Solucao) -> dict[str, str]:
+        """Variaveis que o portal preenche com o Supabase da solucao ([supabase] no manifesto)."""
+        if not sol.supabase:
+            return {}
+        seg = sb.segredos(self.config.pasta_dados, sol.id)
+        valores = {"url": self.url(sol), "chave_anon": seg.anon,
+                   "url_interna": f"http://{sb.gateway(sol.id)}", "chave_servico": seg.service}
+        return {nome: valores[campo] for campo, nome in sol.supabase.items() if nome}
+
+    def _supabase_na_construcao(self, sol: Solucao) -> dict[str, str]:
+        """Endereco e chave publica, quando o site os le na construcao (Vite, Next NEXT_PUBLIC_...)."""
+        if not sol.supabase:
+            return {}
+        construcao = {c.nome for c in sol.configuracoes if c.na_construcao}
+        todas = self.variaveis_supabase(sol)
+        return {sol.supabase[c]: todas[sol.supabase[c]] for c in ("url", "chave_anon")
+                if sol.supabase[c] and (sol.variaveis_na_construcao or VARS_PUBLICAS_BUILD.match(sol.supabase[c])
+                                        or sol.supabase[c] in construcao)}
+
+    def resumo_construcao(self, sol: Solucao) -> str:
+        args = self.variaveis_de_construcao(sol)
+        return hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()[:24] if args else ""
+
     # ---------- ambiente ----------
     def variaveis_de_construcao(self, sol: Solucao) -> dict[str, str]:
         """Variaveis passadas ao docker build (--build-arg): as configuracoes marcadas `construcao`
@@ -235,6 +271,7 @@ class Gerenciador:
         for c in sol.configuracoes:
             if todas or c.na_construcao:
                 args[c.nome] = str(valores.get(c.nome, ""))
+        args.update(self._supabase_na_construcao(sol))
         return args
 
     def ambiente(self, sol: Solucao) -> dict[str, str]:
@@ -245,11 +282,17 @@ class Gerenciador:
             if valor != "":
                 env[nome] = valor
         env.update(self.armazenamento.segredos(sol))
+        env.update(self.variaveis_supabase(sol))
         return env
 
     # ---------- status ----------
     def status(self, sol: Solucao) -> dict:
-        if sol.externo:  # sobe por fora do portal (ex.: deploy/supabase): so conferimos se responde
+        if sol.externo:  # sobe por fora do fluxo normal (ex.: o Studio): so conferimos se responde
+            if sol.externo.startswith(sb.STUDIO + ":"):
+                projeto = sb.studio_projeto()
+                if projeto:
+                    return {"estado": "rodando", "detalhe": f"Mostrando o Supabase de {projeto}"}
+                return {"estado": "parado", "detalhe": "Desligado: use 'Abrir o Studio' na solução que usa o Supabase"}
             if self._responde(sol):
                 return {"estado": "rodando", "detalhe": "No ar (gerenciado pelo servidor)"}
             return {"estado": "com_problema", "detalhe": "Fora do ar: rode deploy/atualizar.sh no servidor"}
@@ -268,6 +311,8 @@ class Gerenciador:
         if estado.get("Running"):
             # Com HEALTHCHECK na imagem, o proprio Docker diz se a aplicacao responde.
             if saude == "healthy" or (saude is None and self._responde(sol)):
+                if sol.supabase and not sb.gateway_no_ar(sol.id):
+                    return {"estado": "com_problema", "detalhe": "O Supabase do sistema esta fora do ar: clique em Reiniciar"}
                 return {"estado": "rodando", "detalhe": "No ar"}
             if saude is None:
                 return {"estado": "iniciando", "detalhe": "Aguardando resposta"}
@@ -316,6 +361,10 @@ class Gerenciador:
             elif tarefa.acao == "iniciar":
                 if not docker_cli.image_exists(sol.imagem):
                     self._build(sol, tarefa)
+                elif self._construcao_mudou(sol):
+                    tarefa.registrar("As variaveis da construcao mudaram (por exemplo, o endereco do servidor): "
+                                     "reconstruindo para o site usar os valores novos.")
+                    self._build(sol, tarefa)
                 self._iniciar(sol, tarefa)
             elif tarefa.acao == "reconstruir":
                 self._build(sol, tarefa)
@@ -323,12 +372,18 @@ class Gerenciador:
             elif tarefa.acao == "parar":
                 tarefa.etapa = "Parando"
                 tarefa.registrar(f"$ docker stop {sol.container}")
-                docker_cli.stop(sol.container)
+                if docker_cli.container_inspect(sol.container):
+                    docker_cli.stop(sol.container)
                 tarefa.registrar("Container parado. Os dados foram mantidos.")
+                if sol.supabase:
+                    tarefa.etapa = "Parando o Supabase"
+                    sb.parar(sol.id, tarefa.registrar)
             elif tarefa.acao == "remover":
                 tarefa.etapa = "Removendo"
                 docker_cli.remove(sol.container)
                 tarefa.registrar("Container removido. Imagem e dados (volumes) foram mantidos.")
+                if sol.supabase:
+                    sb.remover_containers(sol.id, tarefa.registrar)
             tarefa.estado = "concluida"
         except Exception as exc:  # noqa: BLE001 - qualquer falha vira mensagem para o usuario
             tarefa.estado = "falhou"
@@ -337,6 +392,12 @@ class Gerenciador:
         finally:
             tarefa.etapa = ""
             tarefa.fim = time.time()
+
+    def _construcao_mudou(self, sol: Solucao) -> bool:
+        """True se a imagem foi construida com outras variaveis de construcao (so quando o portal
+        sabe com quais: imagens de antes deste controle nao sao reconstruidas sem pedido)."""
+        anterior = self.armazenamento.construcao(sol.id)
+        return bool(anterior) and anterior != (self.resumo_construcao(sol) or "-")
 
     def _build(self, sol: Solucao, tarefa: Tarefa) -> None:
         versao = None
@@ -372,6 +433,7 @@ class Gerenciador:
             dockerfile = docker_cli.com_args(dockerfile, list(build_args), self.config.pasta_dados / "build" / sol.id)
         docker_cli.build(contexto, dockerfile, sol.imagem, tarefa.registrar, contextos, build_args)
         tarefa.registrar("Imagem construida com sucesso.")
+        self.armazenamento.registrar_construcao(sol.id, self.resumo_construcao(sol) or "-")
         if versao:
             info = {"commit": versao.commit, "resumo": versao.resumo, "data": versao.data, "ref": sol.ref}
             # A imagem pode ser compartilhada: registra a versao em todas as solucoes que a usam.
@@ -411,13 +473,19 @@ class Gerenciador:
 
     def _iniciar(self, sol: Solucao, tarefa: Tarefa) -> None:
         valores = self.armazenamento.configuracoes(sol)
-        faltando = [c.rotulo for c in sol.configuracoes if c.obrigatoria and not valores.get(c.nome)]
+        faltando = sol.faltando(valores)
         if faltando:
             raise docker_cli.DockerError(
                 f"Preencha em Configuracoes antes de iniciar: {', '.join(faltando)}. Depois clique em Iniciar."
             )
         if sol.banco:
             self._preparar_banco(sol, tarefa)
+        if sol.supabase:
+            tarefa.etapa = "Preparando o Supabase do sistema"
+            try:
+                sb.garantir(sol.id, self.url(sol), self.config.pasta_dados, self.config.rede_docker, tarefa.registrar)
+            except sb.ErroSupabase as exc:
+                raise docker_cli.DockerError(str(exc)) from exc
         tarefa.etapa = "Iniciando container"
         # Recria o container para aplicar configuracoes novas; os volumes preservam os dados.
         docker_cli.remove(sol.container)

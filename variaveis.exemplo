@@ -18,19 +18,15 @@ PORTAL_GIT_TOKEN=
 # de cada solucao sozinho. So vale na primeira subida do banco; trocar depois nao muda nada.
 PORTAL_POSTGRES_SENHA=
 
-# ---- Supabase do servidor (deploy/supabase) ----
-# Liga o Supabase proprio na VM (API na 8111, painel Studio na 8112). Os segredos SUPABASE_*
-# sao gerados sozinhos na primeira vez por deploy/supabase/subir.sh; nao os troque depois.
-# PORTAL_SUPABASE=sim
-# PORTAL_SUPABASE_PORTA_API=8111
-# Opcionais: endereco do sistema que usa o login (links de e-mail), e-mail (SMTP), limites.
-# SUPABASE_SITE_URL=http://192.168.0.50:8113
+# ---- Supabase das solucoes ([supabase] no manifesto) ----
+# Cada solucao com [supabase] ganha um Supabase proprio, criado pelo portal no Iniciar; nada a
+# configurar aqui. Opcional: e-mail do login (confirmacao, "esqueci a senha"), igual para todos.
+# Sem SMTP, a confirmacao de e-mail e automatica.
 # SUPABASE_SMTP_SERVIDOR=smtp.empresa.com.br
 # SUPABASE_SMTP_PORTA=587
 # SUPABASE_SMTP_USUARIO=...
 # SUPABASE_SMTP_SENHA=...
 # SUPABASE_SMTP_REMETENTE=portal@empresa.com.br
-# SUPABASE_DESLIGAR_CADASTRO=false
 
 # ---- Limites e uso (tela Uso) ----
 # Limite padrao de cada solucao (o manifesto e a tela Uso mudam por solucao). 0 = sem limite.

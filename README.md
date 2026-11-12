@@ -254,34 +254,51 @@ ou a do usuário de uma solução, que só enxerga o próprio banco).
 Remover uma solução do portal não apaga o banco dela. Para apagar (irreversível):
 `sudo docker compose exec postgres psql -U postgres -c 'DROP DATABASE jornada_lideranca'`.
 
-## Supabase do servidor (opcional)
+## Supabase das soluções (um por sistema)
 
-Para sistemas feitos sobre o Supabase (ex.: Panorama), o portal pode subir um Supabase próprio na
-VM, em `deploy/supabase/`: banco (PostgreSQL 17 do Supabase), login, API de dados, arquivos, o
-painel Studio e o gateway. As versões são as do compose oficial (commit em
-`deploy/supabase/ORIGEM-COMMIT`), sem realtime, edge functions, logs e pooler.
+Para sistemas feitos sobre o Supabase (ex.: Panorama), o portal cria **um Supabase só para cada
+sistema**: banco (PostgreSQL 17 do Supabase), login, API de dados, arquivos e o gateway, em
+containers `log20-sb-<id>-*` numa rede só dele. Banco, usuários e arquivos de um sistema não se
+misturam com os de outro, e o código do sistema não muda. As versões das imagens e os arquivos de
+`deploy/supabase/volumes` são os do compose oficial (commit em `deploy/supabase/ORIGEM-COMMIT`),
+sem realtime, edge functions, logs e pooler.
 
-**Ligar:** no `.env`, `PORTAL_SUPABASE=sim`, e `bash deploy/atualizar.sh`. Na primeira vez
-`deploy/supabase/subir.sh` gera no `.env` os segredos (senha do banco, `SUPABASE_JWT_SECRET`, as
-chaves `SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY` assinadas com ele, usuário e senha do
-painel) e **nunca mais os troca** (trocar o segredo derruba os logins e invalida as chaves gravadas
-nos sites). O endereço da API acompanha o `PORTAL_URL_BASE` (troca de IP). A primeira subida baixa
-as imagens (alguns minutos) e a pilha usa de 1,5 a 3 GB de memória.
+**Ligar:** no manifesto, a seção `[supabase]` (o assistente "Nova solução" põe sozinho quando o
+projeto usa `@supabase/supabase-js`):
 
-| Porta | O quê | Acesso |
+```toml
+[supabase]
+url = "VITE_SUPABASE_URL"            # recebe o endereço do sistema
+chave_anon = "VITE_SUPABASE_ANON_KEY" # recebe a chave pública
+# chave_servico = "SUPABASE_SERVICE_ROLE_KEY"  # só para código que roda no servidor
+# url_interna = "SUPABASE_URL"                 # idem: endereço na rede interna (sem login do portal)
+```
+
+No primeiro **Iniciar**, o portal gera os segredos (em `dados/supabase/<id>.json`, nunca mais
+trocados), baixa as imagens (alguns minutos), sobe a pilha e preenche as variáveis; a pilha usa de
+1 a 1,5 GB de memória. Os dados ficam nos volumes `log20-sb-<id>-dados|config|arquivos`:
+reiniciar, atualizar, **Parar** ou **Remover** a solução nunca os apaga (Parar também para o
+Supabase dela).
+
+| Onde | O quê | Acesso |
 | --- | --- | --- |
-| **8111** (`PORTAL_SUPABASE_PORTA_API`) | API para os sistemas: `/rest/v1`, `/auth/v1`, `/storage/v1` | Sem login do portal: as chaves e as regras (RLS) do Supabase protegem os dados, como na nuvem. Os outros caminhos (o painel) respondem 404. |
-| **8112** | **Supabase Studio** (solução do catálogo, "gerenciada pelo servidor") | Login do portal + liberação em **Acessos** + usuário do painel (`SUPABASE_PAINEL_USUARIO`, padrão `supabaselog`; senha em `SUPABASE_PAINEL_SENHA` no `.env`). Dá acesso total ao banco: só administradores. |
+| **Mesmo endereço do sistema** (`/rest/v1`, `/auth/v1`, `/storage/v1`) | API que o site usa | Login do portal e liberação do sistema em **Acessos** (como o próprio sistema); depois, as chaves e as regras (RLS) do Supabase. Sem porta extra e sem CORS. |
+| **8112** | **Supabase Studio** (painel; um só no servidor) | Login do portal + liberação em **Acessos**. Mostra um sistema de cada vez: em **Gerenciar**, o botão **Abrir o Studio** aponta o painel para o sistema. Dá acesso total ao banco: só administradores. |
 
-Os dados ficam nos volumes `log20-supabase-dados` e `log20-supabase-arquivos`; rodar de novo nunca
-apaga nada. Os containers aparecem na tela **Uso**. Soluções com `[execucao] externo =
-"container:porta"` (como o Studio) não são construídas nem iniciadas pelo portal: ele só publica a
-porta, controla o acesso e mostra se está no ar; `requer = "supabase"` esconde a solução quando o
-Supabase está desligado. Login sem e-mail: cadastro ligado com confirmação automática (o Panorama
-cria usuários pela tela dele); `SUPABASE_SMTP_*` no `.env` liga o envio de e-mail.
+**Troca de IP:** o endereço vai gravado no site na construção. O portal guarda com que valores
+construiu a imagem; no próximo Iniciar (o `atualizar.sh` reinicia tudo quando o IP muda), se o
+endereço mudou, ele reconstrói o site e recria os containers do Supabase com o endereço novo.
 
-**Ainda não incluído** (próximas etapas): o banco do Supabase no backup diário, preencher sozinho
-`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` dos sistemas e copiar os dados do Supabase da nuvem.
+Login sem e-mail: cadastro ligado com confirmação automática (o Panorama cria usuários pela tela
+dele); `SUPABASE_SMTP_*` no `.env` liga o envio de e-mail para todos. Linha de comando:
+`python -m marketplace supabase listar|conferir|subir|parar [ids]`.
+
+**Ainda não incluído** (próximas etapas): copiar os dados do Supabase da nuvem pela tela e o banco e
+os arquivos do Supabase no backup diário.
+
+**Quem usou a primeira versão** (`PORTAL_SUPABASE=sim`, containers `log20-supabase-*`, API na
+8111): ela não é mais usada nem atualizada. O `atualizar.sh` avisa e mostra como desligá-la; os
+dados ficam nos volumes `log20-supabase-*` até alguém apagá-los.
 
 ## Variáveis na construção (sites Vite, React, Next)
 

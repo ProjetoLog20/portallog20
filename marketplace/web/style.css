@@ -865,3 +865,19 @@ body:has(.barra-selecao:not([hidden])) .toast { bottom: 92px; }
   .lista-eventos li { grid-template-columns: 1fr; gap: 2px; }
 }
 .tabela-uso .alerta-limite { color: var(--atencao); max-width: 220px; white-space: normal; }
+
+/* ----- Supabase do sistema ----- */
+.lista-partes { list-style: none; margin: 8px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.lista-partes li { display: flex; flex-direction: column; padding: 6px 10px; border: 1px solid var(--linha); border-left: 4px solid var(--neutro); border-radius: var(--raio-p); background: var(--superficie-2); font-size: 13.5px; }
+.lista-partes li small { color: var(--suave); font-size: 12px; }
+.lista-partes li[data-situacao="ok"] { border-left-color: var(--ok); }
+.lista-partes li[data-situacao="alerta"] { border-left-color: var(--erro); }
+.lista-partes li[data-situacao="alerta"] small { color: var(--erro); }
+.grupo-supabase { padding: 12px 14px; border: 1px solid var(--linha); border-radius: var(--raio); background: var(--superficie-2); }
+.grupo-supabase .form-grade { margin-top: 10px; }
+.lista-partes li span { display: block; }
+.lista-partes li span::first-letter { text-transform: uppercase; }
+.lista-variaveis { list-style: none; margin: 4px 0 8px; padding: 0; font-size: 13.5px; }
+.lista-variaveis li { display: flex; flex-wrap: wrap; gap: 2px 8px; padding: 3px 0; }
+.lista-variaveis code { font-family: var(--mono); font-size: 12.5px; background: var(--petroleo-claro); padding: 1px 6px; border-radius: 4px; }
+.lista-variaveis span { color: var(--suave); }

@@ -77,7 +77,7 @@ def validar(_: argparse.Namespace) -> int:
     print(f"\n{len(solucoes)} solucao(oes) lida(s), {len(erros)} erro(s), {len(avisos)} aviso(s).")
     for sol in sorted(solucoes.values(), key=lambda s: s.porta_host):
         origem = (f"{sol.repositorio} ({sol.ref})" if sol.repositorio else f"gerenciado pelo servidor: {sol.externo}" if sol.externo else str(sol.contexto_build))
-        print(f"  {sol.porta_host}  {sol.id:<34} {origem}")
+        print(f"  {sol.porta_host}  {sol.id:<34} {origem}" + ("  + Supabase proprio" if sol.supabase else ""))
     return 1 if erros else 0
 
 
@@ -216,16 +216,45 @@ def cmd_restaurar(args: argparse.Namespace) -> int:
 
 
 def cmd_supabase(args: argparse.Namespace) -> int:
-    from . import supabase
+    """Supabase de cada solucao ([supabase] no manifesto): listar, conferir, subir, parar."""
+    from . import docker_cli
+    from . import supabase as sb
+    from .catalog import carregar_catalogo
+    from .manager import Armazenamento, Gerenciador
 
-    env = config_mod.RAIZ / ".env"
-    if args.acao == "preparar":
-        mudou = supabase.preparar(env, int(os.environ.get("PORTAL_SUPABASE_PORTA_API", "") or 8111))
-        print("Supabase: .env " + (f"atualizado ({', '.join(mudou)})" if mudou else "ja estava pronto"))
-    problemas = supabase.conferir_chaves(env)
-    for p in problemas:
-        print(f"ERRO: {p}", file=sys.stderr)
-    return 1 if problemas else 0
+    cfg = config_mod.carregar()
+    solucoes, _ = carregar_catalogo(cfg.pasta_solucoes, cfg.pasta_solucoes_locais)
+    com = {sid: s for sid, s in solucoes.items() if s.supabase}
+    alvos = args.solucoes or sorted(com)
+    desconhecidas = [a for a in alvos if a not in com]
+    if desconhecidas:
+        print(f"Sem [supabase] no manifesto (ou inexistentes): {', '.join(desconhecidas)}", file=sys.stderr)
+        return 1
+    if not alvos:
+        print("Nenhuma solucao usa o Supabase do servidor ([supabase] no manifesto).")
+        return 0
+    ger = Gerenciador(solucoes, Armazenamento(cfg.pasta_dados), cfg)
+    falhas = 0
+    for sid in alvos:
+        sol = com[sid]
+        if args.acao == "listar":
+            e = sb.estado(sid)
+            partes = ", ".join(f"{p['rotulo']}: {p['situacao']}" for p in e["partes"])
+            print(f"{sid:<34} {'no ar' if e['no_ar'] else 'NAO ESTA NO AR':<16} {partes}")
+        elif args.acao == "conferir":
+            problemas = sb.conferir(cfg.pasta_dados, sid)
+            print(f"{sid}: " + ("chaves ok" if not problemas else "; ".join(problemas)))
+            falhas += bool(problemas)
+        elif args.acao == "subir":
+            print(f"\n==> Supabase de {sid}")
+            try:
+                sb.garantir(sid, ger.url(sol), cfg.pasta_dados, cfg.rede_docker, lambda t: print(f"  {t}", flush=True))
+            except (sb.ErroSupabase, docker_cli.DockerError) as exc:
+                print(f"ERRO: {exc}", file=sys.stderr)
+                falhas += 1
+        elif args.acao == "parar":
+            sb.parar(sid, lambda t: print(f"  {sid}: {t}"))
+    return 1 if falhas else 0
 
 
 def servir(args: argparse.Namespace) -> int:
@@ -290,9 +319,10 @@ def main() -> None:
     p_res.add_argument("--sem-banco", action="store_true", help="Nao restaura o banco")
     p_res.add_argument("--sem-arquivos", action="store_true", help="Nao restaura os volumes")
     p_res.add_argument("--sim", action="store_true", help="Nao pede confirmacao")
-    p_sup = sub.add_parser("supabase", help="Supabase do servidor (deploy/supabase)")
-    p_sup.add_argument("acao", choices=["preparar", "conferir"],
-                       help="preparar: gera os segredos que faltam no .env; conferir: so confere as chaves")
+    p_sup = sub.add_parser("supabase", help="Supabase de cada solucao ([supabase] no manifesto)")
+    p_sup.add_argument("acao", choices=["listar", "conferir", "subir", "parar"],
+                       help="listar: situacao de cada pilha; conferir: chaves; subir/parar: so o Supabase")
+    p_sup.add_argument("solucoes", nargs="*", help="Ids das solucoes (padrao: todas as que usam Supabase)")
     args = parser.parse_args()
     comandos = {"supabase": cmd_supabase, "backup": cmd_backup, "backups": cmd_backups, "verificar-backup": cmd_verificar,
                 "restaurar": cmd_restaurar}

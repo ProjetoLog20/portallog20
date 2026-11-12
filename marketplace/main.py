@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config as config_mod
 from . import assistente, docker_cli, proxy
+from . import supabase as sb
 from .backup import Backups, ErroBackup, formatar_tamanho, resumo
 from .catalog import cpus_validas, memoria_mb
 from .uso import INFRA, Uso
@@ -57,8 +58,7 @@ def _atualizar_proxy(solucoes) -> dict | None:
     if not CFG.caddy_container:
         return None
     try:
-        extras = proxy.extras(CFG, {s.id: s for s in solucoes})
-        r = proxy.aplicar(proxy.gerar(solucoes, CFG.portal_upstream, COOKIE, extras), CFG.caddy_pasta, CFG.caddy_container)
+        r = proxy.aplicar(proxy.gerar(solucoes, CFG.portal_upstream, COOKIE), CFG.caddy_pasta, CFG.caddy_container)
     except Exception as exc:  # noqa: BLE001 - o portal continua no ar mesmo se o Caddy falhar
         r = proxy.Resultado(False, f"Falha ao atualizar o Caddy: {exc}", erro=True)
     print(f"[caddy] {r.mensagem}", flush=True)
@@ -372,6 +372,7 @@ def api_detalhe(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
                   if b else None)(ger().armazenamento.banco(sol.id)) if sol.banco else None,
         "url_padrao": f"{CFG.url_base}:{sol.porta_host}",
         "campos_banco": sorted(sol.banco) if sol.banco else [],
+        "supabase": _detalhe_supabase(sol, docker_ok),
         "externo": bool(sol.externo),
         "local": sol.local,
         "dockerfile_portal": bool(sol.dockerfile_portal),
@@ -387,6 +388,8 @@ def api_detalhe(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
                 # Segredos nunca saem do portal: so informamos se existe valor.
                 "valor": None if c.tipo == "segredo" else valores.get(c.nome, ""),
                 "definido": bool(valores.get(c.nome)),
+                # Preenchida pelo portal com o Supabase da solucao: a tela mostra, mas nao edita.
+                "gerenciada": c.nome in sol.nomes_supabase,
             }
             for c in sol.configuracoes
         ],
@@ -434,6 +437,43 @@ def api_configurar(sid: str, valores: dict = Body(..., embed=True), _: Usuario =
         return {"ok": True, "acao": "reconstruir",
                 "aviso": f"{', '.join(de_build)} entra(m) no sistema na construcao: clique em Atualizar para valer."}
     return {"ok": True, "acao": "iniciar", "aviso": "Reinicie a solucao para aplicar as mudancas."}
+
+
+def _studio() -> Solucao | None:
+    return next((s for s in ger().solucoes.values() if s.externo == f"{sb.STUDIO}:3000"), None)
+
+
+def _detalhe_supabase(sol: Solucao, docker_ok: bool) -> dict | None:
+    if not sol.supabase:
+        return None
+    studio = _studio()
+    estado = sb.estado(sol.id) if docker_ok else None
+    rotulos = {"url": "endereço, o mesmo do sistema", "chave_anon": "chave pública (anon)",
+               "url_interna": "endereço na rede interna, para o servidor do sistema",
+               "chave_servico": "chave de serviço (service_role), só no servidor"}
+    return {
+        "variaveis": [{"nome": nome, "conteudo": rotulos[campo]} for campo, nome in sol.supabase.items() if nome],
+        "estado": estado,
+        "studio": {"porta": studio.porta_host, "url": ger().url(studio) + "/"} if studio else None,
+        "volumes": sb.volumes(sol.id),
+    }
+
+
+@app.post("/api/solucoes/{sid}/supabase/studio")
+def api_abrir_studio(sid: str, autor: Usuario = Depends(exigir_admin)) -> dict:
+    """Aponta o Supabase Studio (um so no servidor) para a pilha desta solucao."""
+    sol = _solucao(sid)
+    if not sol.supabase:
+        raise HTTPException(400, "Esta solucao nao usa o Supabase do servidor.")
+    studio = _studio()
+    if studio is None:
+        raise HTTPException(400, "A solucao 'supabase-studio' nao esta no catalogo deste portal.")
+    try:
+        sb.abrir_studio(sol.id, sol.nome, ger().url(sol), CFG.pasta_dados, CFG.rede_docker, lambda _: None)
+    except (sb.ErroSupabase, docker_cli.DockerError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    AUTH.registrar(autor, "Abriu o Supabase Studio", sid)
+    return {"ok": True, "url": ger().url(studio) + "/"}
 
 
 @app.post("/api/solucoes/{sid}/banco/restaurar")
@@ -967,14 +1007,27 @@ def api_uso(horas: float = 24, _: Usuario = Depends(exigir_admin)) -> dict:
                       "banco": tam["bancos"].get(nome_banco, 0) if nome_banco else 0,
                       "imagem": tam["imagens"].get(imagem, 0)},
         })
-    for nome, rotulo in INFRA.items():
-        if nome.startswith("log20-supabase-") and not CFG.supabase_ativo and nome not in atual["conteineres"]:
+    from . import supabase as sb
+    from .uso import ALVO_SUPABASE, SUPABASE_ANTIGO
+
+    infra = dict(INFRA)
+    for sol in sorted(ger().solucoes.values(), key=lambda s: s.nome.lower()):
+        if sol.supabase:
+            infra[ALVO_SUPABASE + sol.id] = f"Supabase de {sol.nome}"
+    if SUPABASE_ANTIGO in atual["conteineres"]:
+        infra[SUPABASE_ANTIGO] = "Supabase fixo antigo (log20-supabase, substituído)"
+    for nome, rotulo in infra.items():
+        if nome == "log20-sb-studio" and nome not in atual["conteineres"]:
             continue
         c = atual["conteineres"].get(nome) or {}
         pico = picos.get(nome) or {}
-        alvos.append({"id": nome, "nome": rotulo, "tipo": "infra", "rodando": nome in atual["conteineres"],
-                      "cpu": c.get("cpu"), "mem": c.get("mem"), "mem_limite_docker": c.get("mem_limite"),
-                      "pico_mem_24h": pico.get("mem"), "pico_cpu_24h": pico.get("cpu")})
+        item = {"id": nome, "nome": rotulo, "tipo": "infra", "rodando": nome in atual["conteineres"],
+                "cpu": c.get("cpu"), "mem": c.get("mem"), "mem_limite_docker": c.get("mem_limite"),
+                "pico_mem_24h": pico.get("mem"), "pico_cpu_24h": pico.get("cpu")}
+        if nome.startswith(ALVO_SUPABASE):
+            sid = nome[len(ALVO_SUPABASE):]
+            item["disco"] = {"volumes": sum(tam["volumes"].get(v, 0) for v in sb.volumes(sid)), "banco": 0, "imagem": 0}
+        alvos.append(item)
     return {
         "ts": atual["ts"], "maquina": atual["maquina"], "alvos": alvos, "historico": hist, "tamanhos": tam,
         "padroes": {"memoria_mb": CFG.limite_memoria_mb, "cpus": CFG.limite_cpus, "processos": CFG.limite_processos},

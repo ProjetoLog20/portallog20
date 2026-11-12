@@ -126,6 +126,16 @@ caminho_abrir = "/"
 # [banco.configuracoes]
 # DATABASE_URL = "{db_url}"
 
+# Supabase proprio (opcional), para sistemas feitos sobre o Supabase (supabase-js). O portal cria
+# banco, login e arquivos so desta solucao, no mesmo endereco dela (/rest/v1, /auth/v1,
+# /storage/v1), e preenche as variaveis indicadas (nao precisam estar em [[configuracoes]]).
+# chave_servico e url_interna: so para codigo que roda no servidor (nunca com prefixo VITE_ etc.).
+# [supabase]
+# url = "VITE_SUPABASE_URL"
+# chave_anon = "VITE_SUPABASE_ANON_KEY"
+# chave_servico = "SUPABASE_SERVICE_ROLE_KEY"
+# url_interna = "SUPABASE_URL"
+
 
 # ----------------------------------------------------------------------------
 # Configuracoes editaveis pelo administrador (Solucoes > Gerenciar > Configuracoes)

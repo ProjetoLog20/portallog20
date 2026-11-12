@@ -29,11 +29,12 @@ from .config import RAIZ, Config
 from .manager import Gerenciador
 
 INFRA = {"log20-portal": "Portal", "log20-caddy": "Proxy (Caddy)", "log20-postgres": "PostgreSQL do servidor",
-         # Supabase do servidor (deploy/supabase), quando ligado
-         "log20-supabase-db": "Supabase: banco", "log20-supabase-auth": "Supabase: login",
-         "log20-supabase-rest": "Supabase: API de dados", "log20-supabase-storage": "Supabase: arquivos",
-         "log20-supabase-meta": "Supabase: meta", "log20-supabase-studio": "Supabase: Studio",
-         "log20-supabase-gw": "Supabase: gateway"}
+         "log20-sb-studio": "Supabase Studio"}
+# A pilha fixa da primeira versao (deploy/supabase, containers log20-supabase-*), se ainda estiver
+# ligada numa VM: aparece somada numa linha so, para ficar claro quanto ela ocupa.
+SUPABASE_ANTIGO = "log20-supabase"
+# Pilha do Supabase de cada solucao (containers log20-sb-<id>-*): alvo "supabase:<id>".
+ALVO_SUPABASE = "supabase:"
 VOLUME_POSTGRES = "log20-postgres-dados"
 TAMANHOS_A_CADA = 15 * 60
 
@@ -110,8 +111,13 @@ class Uso:
     # ---------------- coleta ----------------
     def _nomes(self, ger: Gerenciador) -> dict[str, str]:
         """nome do container -> id do alvo (id da solucao, ou o nome do container para a infra)."""
+        from . import supabase as sb
+
         nomes = {sol.container: sid for sid, sol in ger.solucoes.items()}
         nomes.update({c: c for c in INFRA})
+        for sid, sol in ger.solucoes.items():
+            if sol.supabase:
+                nomes.update({sb.container(sid, s): ALVO_SUPABASE + sid for s in sb.SERVICOS})
         return nomes
 
     def coletar(self) -> dict:
@@ -123,12 +129,18 @@ class Uso:
         conteineres: dict[str, dict] = {}
         try:
             for s in docker_cli.estatisticas():
-                alvo = nomes.get(s.get("Name", ""))
+                nome = s.get("Name", "")
+                alvo = nomes.get(nome) or (SUPABASE_ANTIGO if nome.startswith(SUPABASE_ANTIGO + "-") else None)
                 if not alvo:
                     continue
                 usado, _, limite = str(s.get("MemUsage", "")).partition("/")
-                conteineres[alvo] = {"cpu": percentual(s.get("CPUPerc")) / 100, "mem": bytes_de(usado),
-                                     "mem_limite": bytes_de(limite), "processos": int(s.get("PIDs") or 0)}
+                atual = {"cpu": percentual(s.get("CPUPerc")) / 100, "mem": bytes_de(usado),
+                         "mem_limite": bytes_de(limite), "processos": int(s.get("PIDs") or 0)}
+                if alvo in conteineres:  # varios containers no mesmo alvo (pilha do Supabase): soma
+                    antes = conteineres[alvo]
+                    atual = {"cpu": antes["cpu"] + atual["cpu"], "mem": antes["mem"] + atual["mem"],
+                             "mem_limite": 0, "processos": antes["processos"] + atual["processos"]}
+                conteineres[alvo] = atual
             self.erro = ""
         except docker_cli.DockerError as exc:
             self.erro = f"docker stats: {exc}"
@@ -185,7 +197,10 @@ class Uso:
         # Volumes: um container so, com todos os volumes montados so para leitura, mede com du.
         try:
             existentes = {v.get("Name") for v in docker_cli.listar_json(["volume", "ls"])}
-            vols = sorted({sol.nome_volume(c) for sol in ger.solucoes.values() for c in sol.volumes} & existentes)
+            from . import supabase as sb
+
+            vols = sorted(({sol.nome_volume(c) for sol in ger.solucoes.values() for c in sol.volumes}
+                           | {v for sol in ger.solucoes.values() if sol.supabase for v in sb.volumes(sol.id)}) & existentes)
             if VOLUME_POSTGRES in existentes:
                 vols.append(VOLUME_POSTGRES)
             if vols:

@@ -54,6 +54,9 @@ class Analise:
     volumes: dict[str, str] = field(default_factory=dict)
     segredos: list[str] = field(default_factory=list)
     banco: dict[str, str] | None = None  # configuracao -> modelo ({db_url}...) se der para usar o banco do servidor
+    # Sistema feito sobre o Supabase: variaveis que o portal preenche com o Supabase proprio dele
+    # ({"url": "VITE_SUPABASE_URL", "chave_anon": ..., "url_interna": "", "chave_servico": ""}).
+    supabase: dict[str, str] | None = None
     configuracoes: list[dict] = field(default_factory=list)
     avisos: list[Aviso] = field(default_factory=list)
     # Arquivos auxiliares do Dockerfile sugerido (nome -> conteudo), guardados com o manifesto.
@@ -751,6 +754,9 @@ def _variaveis(repo: Repo, an: dict) -> None:
             continue
         texto = repo.ler(arq)
         for padrao, aceita_padrao, obrig in PADROES_VARS:
+            # ${NOME} so e variavel em application.properties/yml; em JS/TS e template de texto.
+            if padrao.startswith(r"\$\{") and Path(arq).suffix.lower() not in {".properties", ".yml", ".yaml"}:
+                continue
             for m in re.finditer(padrao, texto):
                 nome = m.group(1)
                 padrao_valor = next((g for g in m.groups()[1:] if g is not None), None) if aceita_padrao else None
@@ -844,13 +850,72 @@ def _variaveis(repo: Repo, an: dict) -> None:
             "sistema, com limite de gastos.", expostas[:8]))
 
 
+# ---------------------------------------------------------------- Supabase
+
+PACOTES_SUPABASE = ("@supabase/supabase-js", "@supabase/ssr")
+RE_SB_URL = re.compile(r"SUPABASE_URL$")
+RE_SB_CHAVE = re.compile(r"SUPABASE_(ANON|PUBLISHABLE)(_DEFAULT)?_KEY$|SUPABASE_KEY$")
+RE_SB_SERVICO = re.compile(r"SUPABASE_(SERVICE(_ROLE)?|SECRET)_KEY$")
+
+
+def _supabase(repo: Repo, an: dict) -> None:
+    """Projeto que usa o Supabase (supabase-js): o portal cria um Supabase so para ele e preenche o
+    endereco e a chave; essas variaveis saem da lista de configuracoes que o administrador preenche."""
+    if not repo.existe("package.json"):
+        return
+    pkg = repo.json("package.json")
+    deps = {**(pkg.get("dependencies") or {}), **(pkg.get("devDependencies") or {})}
+    if not any(p in deps for p in PACOTES_SUPABASE):
+        return
+    nomes = [c["nome"] for c in an["configuracoes"]]
+    publica = lambda n: bool(VARS_BUILD.match(n))  # noqa: E731
+    escolher = lambda r: next((n for n in sorted(nomes, key=lambda n: not publica(n)) if r.search(n)), "")  # noqa: E731
+    site = an["tecnologia"] in ("spa", "nextjs")
+    url = escolher(RE_SB_URL) or ("VITE_SUPABASE_URL" if an["tecnologia"] == "spa" else "")
+    chave = escolher(RE_SB_CHAVE) or ("VITE_SUPABASE_ANON_KEY" if an["tecnologia"] == "spa" else "")
+    servico = next((n for n in nomes if RE_SB_SERVICO.search(n)), "")
+    if servico and publica(servico):
+        an["avisos"].append(Aviso(
+            "erro", "Chave de serviço do Supabase dentro do site",
+            f"{servico} é gravada no site e dá acesso total ao banco, sem as regras (RLS), a qualquer pessoa "
+            "que abrir o sistema. O portal não preenche essa variável; o site deve usar só a chave pública (anon).",
+            [servico]))
+        servico = ""
+    if site and servico:
+        servico = ""  # site estatico: nada roda no servidor que possa guardar a chave
+    an["supabase"] = {"url": url, "chave_anon": chave, "url_interna": "", "chave_servico": servico}
+    gerenciadas = {n for n in an["supabase"].values() if n}
+    an["configuracoes"] = [c for c in an["configuracoes"] if c["nome"] not in gerenciadas]
+    # A chave anon e publica de proposito (as regras RLS protegem os dados): nao e "segredo exposto".
+    for av in list(an["avisos"]):
+        if av.titulo == "Chave secreta dentro do site":
+            av.arquivos = [n for n in av.arquivos if n not in gerenciadas]
+            if not av.arquivos:
+                an["avisos"].remove(av)
+    texto = "\n".join(repo.ler(a) for a in repo.com_extensao(".js", ".ts", ".jsx", ".tsx", ".vue", ".mjs")[:600])
+    an["avisos"].append(Aviso(
+        "info", "Usa o Supabase: o portal cria um só para este sistema",
+        "Banco, login e arquivos ficam num Supabase próprio, no servidor, no mesmo endereço do sistema. "
+        f"O portal preenche {', '.join(sorted(gerenciadas)) or 'as variáveis do Supabase'} sozinho. O banco começa vazio: "
+        "traga as tabelas e os dados do Supabase de origem.", sorted(gerenciadas)))
+    if re.search(r"\.channel\(|\.subscribe\(\s*\)|postgres_changes", texto):
+        an["avisos"].append(Aviso(
+            "atencao", "Usa Realtime do Supabase",
+            "O Supabase do servidor não tem o serviço de tempo real: telas que atualizam sozinhas param de "
+            "atualizar (o resto funciona).", []))
+    if re.search(r"functions\.invoke\(", texto) or repo.existe("supabase/functions"):
+        an["avisos"].append(Aviso(
+            "atencao", "Usa Edge Functions do Supabase",
+            "O Supabase do servidor não roda Edge Functions: as chamadas a functions.invoke vão falhar.", []))
+
+
 # ---------------------------------------------------------------- entrada
 
 def analisar(pasta: Path, nome_repo: str = "") -> Analise:
     repo = Repo(pasta)
     an: dict = {"tecnologia": "desconhecida", "nome_tecnologia": "Não identificada", "evidencias": [], "suportado": True,
                 "tem_dockerfile": False, "dockerfile": None, "porta_container": 8080, "caminho_saude": "/", "comando": "",
-                "ambiente": {}, "volumes": {}, "segredos": [], "banco": None, "configuracoes": [], "avisos": [],
+                "ambiente": {}, "volumes": {}, "segredos": [], "banco": None, "supabase": None, "configuracoes": [], "avisos": [],
                 "arquivos": {}}
     ev = an["evidencias"]
     py = "\n".join(repo.ler(a) for a in repo.com_extensao(".py")[:400])
@@ -916,6 +981,7 @@ def analisar(pasta: Path, nome_repo: str = "") -> Analise:
 
     if an["suportado"]:
         _variaveis(repo, an)
+        _supabase(repo, an)
     an["avisos"].extend(_avisos_gerais(repo))
     ordem = {"erro": 0, "atencao": 1, "info": 2}
     an["avisos"].sort(key=lambda a: ordem.get(a.nivel, 3))

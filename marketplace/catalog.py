@@ -115,7 +115,8 @@ class Solucao:
     # Supabase em deploy/supabase). O portal so publica a porta, controla o acesso e mostra o
     # estado; nao constroi, nao inicia nem para.
     externo: str = ""
-    # requer = "supabase": a solucao so entra no catalogo quando PORTAL_SUPABASE=sim no .env.
+    # requer = "supabase": a solucao so entra no catalogo quando alguma outra usa o Supabase do
+    # servidor ([supabase] no manifesto) ou com PORTAL_SUPABASE=sim no .env (ex.: o Studio).
     requer: str = ""
     # [build] variaveis_na_construcao = true: site estatico (Vite/React...). Nada le variavel quando
     # o site roda, entao TODAS as variaveis (fixas e configuracoes) vao para a construcao.
@@ -133,10 +134,25 @@ class Solucao:
     # [recursos]: limites sugeridos por quem fez a solucao (None = padrao do servidor).
     recursos_memoria_mb: int | None = None
     recursos_cpus: float | None = None
+    # [supabase]: o portal cria um Supabase so para esta solucao e preenche as variaveis indicadas
+    # (nome da variavel que recebe cada valor; vazio = nao usa): url (endereco publico, o mesmo do
+    # sistema), chave_anon (chave publica), url_interna e chave_servico (so para codigo que roda no
+    # servidor; a chave de servico nunca vai para o site).
+    supabase: dict[str, str] | None = None
 
     @property
     def container(self) -> str:
         return f"log20-{self.id}"
+
+    @property
+    def nomes_supabase(self) -> set[str]:
+        """Variaveis preenchidas pelo portal com o Supabase da solucao (nao precisam de valor)."""
+        return {n for n in (self.supabase or {}).values() if n}
+
+    def faltando(self, valores: dict[str, str]) -> list[str]:
+        """Rotulos das configuracoes obrigatorias ainda sem valor."""
+        return [c.rotulo for c in self.configuracoes
+                if c.obrigatoria and not valores.get(c.nome) and c.nome not in self.nomes_supabase]
 
     def nome_volume(self, chave: str) -> str:
         return f"log20-{self.id}-{chave}"
@@ -263,6 +279,29 @@ def carregar_manifesto(caminho: Path) -> Solucao:
     if not isinstance(esquemas, list) or not all(isinstance(e, str) and re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", e) for e in esquemas):
         raise ManifestoInvalido(f"{caminho}: [backup] esquemas deve ser uma lista como [\"public\"]")
 
+    supabase = None
+    if "supabase" in dados:
+        sec_sb = dados["supabase"]
+        if not isinstance(sec_sb, dict):
+            raise ManifestoInvalido(f"{caminho}: [supabase] deve ser uma tabela")
+        if servico_externo:
+            raise ManifestoInvalido(f"{caminho}: [supabase] nao combina com externo")
+        supabase = {"url": str(sec_sb.get("url", "VITE_SUPABASE_URL")).strip(),
+                    "chave_anon": str(sec_sb.get("chave_anon", "VITE_SUPABASE_ANON_KEY")).strip(),
+                    "url_interna": str(sec_sb.get("url_interna", "")).strip(),
+                    "chave_servico": str(sec_sb.get("chave_servico", "")).strip()}
+        for campo, nome in supabase.items():
+            if nome and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", nome):
+                raise ManifestoInvalido(f"{caminho}: [supabase] {campo} deve ser o nome de uma variavel (ex.: VITE_SUPABASE_URL)")
+        for campo in ("url_interna", "chave_servico"):
+            if supabase[campo] and VARS_PUBLICAS_BUILD.match(supabase[campo]):
+                raise ManifestoInvalido(
+                    f"{caminho}: [supabase] {campo} = {supabase[campo]}: variaveis com esse prefixo vao para o "
+                    "site e qualquer pessoa leria o valor; use um nome sem prefixo de frontend")
+        if bool(build.get("variaveis_na_construcao", False)) and supabase["chave_servico"]:
+            raise ManifestoInvalido(f"{caminho}: [supabase] chave_servico nao pode ser usada num site estatico "
+                                    "(variaveis_na_construcao): ela iria para o navegador")
+
     configuracoes = []
     for item in dados.get("configuracoes", []):
         tipo = item.get("tipo", "texto")
@@ -324,11 +363,15 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         backup_esquemas=list(esquemas),
         recursos_memoria_mb=rec_mem,
         recursos_cpus=rec_cpus,
+        supabase=supabase,
     )
 
 
-def _ligado(recurso: str) -> bool:
-    """PORTAL_<RECURSO>=sim no ambiente (ex.: PORTAL_SUPABASE)."""
+def _ligado(recurso: str, solucoes: list[Solucao]) -> bool:
+    """O recurso do servidor esta em uso: "supabase" quando alguma solucao tem [supabase]; ou
+    PORTAL_<RECURSO>=sim no ambiente (forca o recurso ligado)."""
+    if recurso == "supabase" and any(s.supabase for s in solucoes):
+        return True
     valor = os.environ.get(f"PORTAL_{recurso.upper()}", "").strip().lower()
     return valor in {"1", "sim", "true", "yes", "on"}
 
@@ -345,6 +388,7 @@ def carregar_catalogo(pasta: Path, pasta_local: Path | None = None) -> tuple[dic
     caminhos = [(c, False) for c in sorted(pasta.glob("*/solucao.toml"))]
     if pasta_local and pasta_local.is_dir():
         caminhos += [(c, True) for c in sorted(pasta_local.glob("*/solucao.toml"))]
+    lidas: list[tuple[Path, Solucao]] = []
     for caminho, local in caminhos:
         try:
             sol = carregar_manifesto(caminho)
@@ -352,8 +396,12 @@ def carregar_catalogo(pasta: Path, pasta_local: Path | None = None) -> tuple[dic
             erros.append(str(exc))
             continue
         sol.local = local
-        if sol.requer and not _ligado(sol.requer):
-            continue  # recurso do servidor desligado (ex.: PORTAL_SUPABASE): a solucao nao aparece
+        lidas.append((caminho, sol))
+    todas = [s for _, s in lidas]
+    for caminho, sol in lidas:
+        local = sol.local
+        if sol.requer and not _ligado(sol.requer, todas):
+            continue  # recurso do servidor sem uso (ex.: Studio sem solucao com Supabase): nao aparece
         if sol.id in solucoes:
             if local:
                 erros.append(f"{caminho}: a solucao '{sol.id}' ja esta no repositorio do portal; "

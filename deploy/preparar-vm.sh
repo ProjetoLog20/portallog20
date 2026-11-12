@@ -126,11 +126,6 @@ if [ "$PRONTO" != "1" ]; then
   exit 1
 fi
 
-# ---------- Supabase do servidor (opcional: PORTAL_SUPABASE=sim no .env) ----------
-if grep -qiE '^PORTAL_SUPABASE=(sim|true|1|yes|on)\s*$' .env; then
-  bash deploy/supabase/subir.sh || aviso "O Supabase nao subiu (veja acima); o portal continua funcionando."
-fi
-
 # ---------- administrador ----------
 TEM_ADMIN=$("${DOCKER[@]}" compose exec -T portal python -c \
   "from marketplace.__main__ import _auth; print(_auth().total_admins_ativos())" 2>/dev/null | tr -d '\r' || echo 0)

@@ -1,26 +1,27 @@
-# Painel do Supabase do servidor (deploy/supabase). So aparece com PORTAL_SUPABASE=sim no .env.
-# O portal nao constroi nem inicia este servico (quem sobe e o deploy/atualizar.sh): ele so publica
-# a porta, pede o login do portal, controla quem acessa (tela Acessos) e mostra se esta no ar.
-# Depois do login do portal, o painel pede o usuario e a senha dele (SUPABASE_PAINEL_* no .env).
+# Painel do Supabase (Studio). Aparece no catalogo quando alguma solucao usa o Supabase do
+# servidor ([supabase] no manifesto). E um so para o servidor e mostra um projeto de cada vez: quem
+# escolhe o projeto e o botao "Abrir o Studio" na tela da solucao (Gerenciar). O portal nao constroi
+# nem inicia este servico por aqui; ele so publica a porta, pede o login do portal, controla quem
+# acessa (tela Acessos) e mostra se esta no ar.
 
 id = "supabase-studio"
 nome = "Supabase Studio"
-resumo = "Painel do Supabase do servidor: tabelas, usuarios do login, arquivos e SQL."
+resumo = "Painel do Supabase: tabelas, usuarios do login, arquivos e SQL de um sistema."
 categoria = "Infraestrutura"
-versao = "1.0.0"
+versao = "2.0.0"
 responsavel = "Administradores do portal"
 tags = ["banco", "supabase", "administracao"]
 requer = "supabase"
 descricao = """
-Painel de administracao do Supabase que roda neste servidor, usado por sistemas feitos sobre o
-Supabase (como o Panorama). Da acesso total ao banco: libere so para administradores.
+Painel de administracao do Supabase dos sistemas feitos sobre ele (como o Panorama). Cada sistema
+tem o seu Supabase; o painel mostra um de cada vez. Para escolher qual, abra a solucao em
+Gerenciar e clique em "Abrir o Studio".
 
-A API que os sistemas usam fica em outra porta (8111, PORTAL_SUPABASE_PORTA_API) e nao passa
-por aqui.
+Da acesso total ao banco do sistema: libere so para administradores.
 """
 
 [execucao]
-externo = "log20-supabase-gw:8000"
+externo = "log20-sb-studio:3000"
 porta_host = 8112
 caminho_saude = "/"
 caminho_abrir = "/"
