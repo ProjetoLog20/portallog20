@@ -279,16 +279,38 @@ select format('delete from %s;', rel) from dep
 """
 
 
-def _copiar_buckets(banco: _Banco) -> int:
-    """Buckets da origem: cria os que faltam e atualiza os que ja existem (pelo id)."""
-    lista, arq = _exportar(banco, "storage", "buckets")
-    cols = [c.strip('"') for c in lista.split(", ")]
-    atualizar = ", ".join(f'"{c}" = excluded."{c}"' for c in cols if c != "id")
-    acao = f"do update set {atualizar}" if atualizar else "do nothing"
-    banco.local_sql(f"create temp table _t (like storage.buckets) on commit drop;\n"
-                    f"\\copy _t ({lista}) from '{arq}' csv\n"
-                    f"insert into storage.buckets ({lista}) select {lista} from _t on conflict (\"id\") {acao};\n")
-    return _contar(banco, "storage.buckets")
+def _copiar_buckets(banco: _Banco, sid: str, seg) -> int:
+    """Buckets da origem, criados (ou atualizados) pela API de arquivos do Supabase local.
+
+    Nao vai direto na tabela: as versoes novas do servico de arquivos bloqueiam mudancas em
+    storage.buckets que nao venham dele ("bucket control columns may only be changed by the
+    configured storage service role")."""
+    linhas = banco.origem_csv("select to_jsonb(b)::text from storage.buckets b order by b.id")
+    base = f"http://{sb.gateway(sid)}/storage/v1/bucket"
+    cab = {"Authorization": f"Bearer {seg.service}", "apikey": seg.service, "Content-Type": "application/json"}
+    n = 0
+    for (texto,) in linhas:
+        b = json.loads(texto)
+        dados = {"id": b["id"], "name": b.get("name") or b["id"], "public": bool(b.get("public")),
+                 "file_size_limit": b.get("file_size_limit"), "allowed_mime_types": b.get("allowed_mime_types")}
+        corpo = json.dumps({k: v for k, v in dados.items() if v is not None}).encode()
+        try:
+            urllib.request.urlopen(urllib.request.Request(base, data=corpo, method="POST", headers=cab), timeout=60).close()
+        except urllib.error.HTTPError as exc:
+            detalhe = exc.read()[:300].decode("utf-8", "replace")
+            if exc.code not in (400, 409) or "exist" not in detalhe.lower():
+                raise ErroCopia(f"Bucket {b['id']}: {exc.code} {detalhe}") from exc
+            # ja existe: atualiza publico/privado, limite de tamanho e tipos aceitos
+            mudar = json.dumps({k: v for k, v in dados.items() if k not in ("id", "name") and v is not None}).encode()
+            try:
+                urllib.request.urlopen(urllib.request.Request(f"{base}/{urllib.parse.quote(b['id'], safe='')}",
+                                                              data=mudar, method="PUT", headers=cab), timeout=60).close()
+            except urllib.error.HTTPError as exc2:
+                raise ErroCopia(f"Bucket {b['id']}: {exc2.code} {exc2.read()[:300].decode('utf-8', 'replace')}") from exc2
+        except (urllib.error.URLError, OSError) as exc:
+            raise ErroCopia(f"Bucket {b['id']}: o servico de arquivos local nao respondeu ({exc}).") from exc
+        n += 1
+    return n
 
 
 # SQL que recria o esquema public com o mesmo dono, as mesmas permissoes e as mesmas permissoes
@@ -423,7 +445,7 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
 
         if partes["storage"]:
             c.etapa = "Copiando os buckets dos arquivos"
-            n_b = _copiar_buckets(banco)
+            n_b = _copiar_buckets(banco, c.sid, seg)
             c.registrar(f"Arquivos: {n_b} bucket(s).")
             c.resumo["buckets"] = n_b
         # As regras dos arquivos costumam usar funcoes do public: recriar o public (tabelas) as apaga
