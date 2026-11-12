@@ -881,3 +881,6 @@ body:has(.barra-selecao:not([hidden])) .toast { bottom: 92px; }
 .lista-variaveis li { display: flex; flex-wrap: wrap; gap: 2px 8px; padding: 3px 0; }
 .lista-variaveis code { font-family: var(--mono); font-size: 12.5px; background: var(--petroleo-claro); padding: 1px 6px; border-radius: 4px; }
 .lista-variaveis span { color: var(--suave); }
+.escolhas-copia { display: grid; gap: 8px; margin: 14px 0; }
+.etapa-copia { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0; }
+.girando { width: 14px; height: 14px; border: 2px solid var(--linha-forte); border-top-color: var(--petroleo); border-radius: 50%; animation: giro .8s linear infinite; display: inline-block; }

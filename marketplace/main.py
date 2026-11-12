@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config as config_mod
 from . import assistente, docker_cli, proxy
 from . import supabase as sb
+from . import supabase_copia
 from .backup import Backups, ErroBackup, formatar_tamanho, resumo
 from .catalog import cpus_validas, memoria_mb
 from .uso import INFRA, Uso
@@ -474,6 +475,32 @@ def api_abrir_studio(sid: str, autor: Usuario = Depends(exigir_admin)) -> dict:
         raise HTTPException(409, str(exc)) from exc
     AUTH.registrar(autor, "Abriu o Supabase Studio", sid)
     return {"ok": True, "url": ger().url(studio) + "/"}
+
+
+@app.post("/api/solucoes/{sid}/supabase/copiar", status_code=202)
+def api_copiar_supabase(sid: str, dados: dict = Body(..., embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
+    """Copia tabelas, usuarios, regras e arquivos de outro Supabase (ex.: o da nuvem) para o desta
+    solucao. Substitui o que estiver no local (com copia de seguranca antes). A senha e a chave
+    da origem so passam pela memoria: nao sao gravadas nem registradas."""
+    sol = _solucao(sid)
+    if not sol.supabase:
+        raise HTTPException(400, "Esta solucao nao usa o Supabase do servidor.")
+    if str(dados.get("confirmacao") or "").strip() != sid:
+        raise HTTPException(400, f"Para confirmar, digite o identificador da solução: {sid}")
+    try:
+        origem, partes = supabase_copia.validar(dados)
+        supabase_copia.iniciar(sid, sol.nome, origem, partes, CFG.pasta_dados, BACKUPS.pasta)
+    except supabase_copia.ErroCopia as exc:
+        raise HTTPException(400, str(exc)) from exc
+    AUTH.registrar(autor, "Copiou dados para o Supabase do sistema",
+                   f"{sid}: {', '.join(k for k, v in partes.items() if v)} de {origem.usuario}@{origem.host}")
+    return {"ok": True, "copia": supabase_copia.situacao(sid)}
+
+
+@app.get("/api/solucoes/{sid}/supabase/copiar")
+def api_situacao_copia(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
+    _solucao(sid)
+    return {"copia": supabase_copia.situacao(sid)}
 
 
 @app.post("/api/solucoes/{sid}/banco/restaurar")
@@ -1007,7 +1034,6 @@ def api_uso(horas: float = 24, _: Usuario = Depends(exigir_admin)) -> dict:
                       "banco": tam["bancos"].get(nome_banco, 0) if nome_banco else 0,
                       "imagem": tam["imagens"].get(imagem, 0)},
         })
-    from . import supabase as sb
     from .uso import ALVO_SUPABASE, SUPABASE_ANTIGO
 
     infra = dict(INFRA)

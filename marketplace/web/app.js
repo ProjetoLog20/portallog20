@@ -682,8 +682,93 @@ function blocoSupabaseDetalhe(sol) {
     est && !est.criado ? h("p", { class: "nota" }, "Ainda não criado: é criado no primeiro Iniciar (baixa as imagens; leva alguns minutos).") : partes,
     est?.criado && !est.no_ar ? h("p", { class: "nota" }, "Fora do ar: clique em Reiniciar na solução.") : null,
     h("p", { class: "nota" }, "Os dados ficam nos volumes ", h("code", {}, `log20-sb-${sol.id}-*`), ": reiniciar, atualizar ou remover o container não os apaga."),
-    botaoStudio ? h("div", { class: "linha-botoes topo-8" }, botaoStudio) : null,
+    est?.no_ar ? h("div", { class: "linha-botoes topo-8" }, botaoStudio,
+      h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoCopiarSupabase(sol) }, "Copiar dados de outro Supabase")) : null,
     sb.studio && !est?.no_ar ? h("p", { class: "nota" }, "O Studio (painel do banco) abre quando o Supabase estiver no ar.") : null);
+}
+
+/** Copiar tabelas, usuários, regras e arquivos de outro Supabase (ex.: o da nuvem). */
+async function dialogoCopiarSupabase(sol) {
+  let atual = null;
+  try { atual = (await api(`/api/solucoes/${sol.id}/supabase/copiar`)).copia; } catch { /* sem cópia anterior */ }
+  const corpo = h("div", {});
+  const rodape = h("div", { class: "linha-botoes" });
+  const dlg = dialogo({ titulo: "Copiar dados de outro Supabase", descricao: sol.nome, corpo, rodape, largo: true });
+  if (atual?.estado === "executando") { acompanhar(); return; }
+
+  const campo = (id, rotulo, extra = {}, ajuda = "") => h("div", { class: "campo" },
+    h("label", { for: id }, rotulo), h("input", { id, autocomplete: "off", spellcheck: false, ...extra }), ajuda ? h("small", {}, ajuda) : null);
+  const marca = (nome, rotulo, ajuda, marcado = true) => h("label", { class: "campo-check" },
+    h("input", { type: "checkbox", name: nome, checked: marcado }), h("span", {}, h("strong", {}, rotulo), h("small", {}, ` ${ajuda}`)));
+  const blocoArquivos = h("div", { class: "form-grade", hidden: true },
+    campo("cp-url", "Endereço do projeto de origem", { type: "text", placeholder: "https://<id>.supabase.co" }, "Em branco: tirado do usuário (postgres.<id>)."),
+    campo("cp-chave", "Chave de serviço da origem", { type: "password" }, "Project Settings → API Keys: service_role (ou secret). Não é guardada."));
+  const form = h("form", { id: "form-copiar", class: "config" },
+    h("p", { class: "nota acima" }, "O que vier substitui o que estiver no Supabase deste sistema. Antes, o portal guarda uma cópia de segurança dele na pasta de backups."),
+    h("div", { class: "form-grade" },
+      campo("cp-host", "Servidor", { type: "text", required: true, placeholder: "aws-1-sa-east-1.pooler.supabase.com" }),
+      campo("cp-porta", "Porta", { type: "number", value: "5432", required: true }),
+      campo("cp-usuario", "Usuário", { type: "text", required: true, placeholder: "postgres.<id do projeto>" })),
+    h("div", { class: "form-grade" },
+      campo("cp-senha", "Senha do banco de origem", { type: "password", required: true, autocomplete: "new-password" },
+        "Só é usada nesta cópia: não fica gravada em lugar nenhum.")),
+    h("small", { class: "sem-topo" }, "No painel da Supabase: Connect → Session pooler (o “Direct connection” só funciona por IPv6). A senha é a do banco: Project Settings → Database."),
+    h("div", { class: "escolhas-copia" },
+      marca("tabelas", "Tabelas e dados", "Esquema public inteiro: tabelas, dados, funções, gatilhos e regras (RLS)."),
+      marca("usuarios", "Usuários do login", "Com as mesmas senhas. Copie junto com as tabelas: elas costumam apontar para os usuários."),
+      marca("storage", "Buckets e regras dos arquivos", "Os buckets e quem pode ler e gravar em cada um."),
+      marca("arquivos", "Arquivos", "Baixa cada arquivo da origem e envia para cá. Precisa da chave de serviço da origem.", false)),
+    blocoArquivos,
+    campo("cp-confirma", `Para confirmar, digite ${sol.id}`, { type: "text", required: true }));
+  form.querySelector("[name=arquivos]").addEventListener("change", (ev) => { blocoArquivos.hidden = !ev.target.checked; });
+  const botao = h("button", { type: "submit", class: "botao perigo-cheio", form: "form-copiar" }, "Copiar e substituir");
+  corpo.replaceChildren(form);
+  rodape.replaceChildren(h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), botao);
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const v = (id) => form.querySelector(`#${id}`).value.trim();
+    const partes = Object.fromEntries(["tabelas", "usuarios", "storage", "arquivos"].map((k) => [k, form.querySelector(`[name=${k}]`).checked]));
+    botao.disabled = true;
+    try {
+      await api(`/api/solucoes/${sol.id}/supabase/copiar`, { method: "POST", body: { dados: {
+        host: v("cp-host"), porta: Number(v("cp-porta")), usuario: v("cp-usuario"), senha: form.querySelector("#cp-senha").value,
+        url: v("cp-url"), chave_servico: form.querySelector("#cp-chave").value, partes, confirmacao: v("cp-confirma") } } });
+      acompanhar();
+    } catch (e) { toast(e.message, "erro"); botao.disabled = false; }
+  });
+
+  function acompanhar() {
+    const etapa = h("p", { class: "etapa-copia" }, "Iniciando…");
+    const pre = h("pre", { class: "saida curta", tabindex: "0" }, "");
+    const fim = h("div", {});
+    corpo.replaceChildren(etapa, pre, fim);
+    rodape.replaceChildren(h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Fechar"));
+    const passo = async () => {
+      if (!dlg.isConnected) return;
+      let c;
+      try { c = (await api(`/api/solucoes/${sol.id}/supabase/copiar`)).copia; } catch { setTimeout(passo, 3000); return; }
+      if (!c) return;
+      pre.textContent = c.log;
+      pre.scrollTop = pre.scrollHeight;
+      if (c.estado === "executando") {
+        etapa.replaceChildren(h("span", { class: "girando", "aria-hidden": "true" }), ` ${c.etapa || "Trabalhando"}… Pode fechar esta janela: a cópia continua.`);
+        setTimeout(passo, 2000);
+        return;
+      }
+      const r = c.resumo || {};
+      const itens = [r.tabelas != null && `${r.tabelas} tabela(s)`, r.usuarios != null && `${r.usuarios} usuário(s)`,
+        r.buckets != null && `${r.buckets} bucket(s)`, r.arquivos != null && `${r.arquivos} arquivo(s)`].filter(Boolean);
+      etapa.replaceChildren(pilula(c.estado === "falhou" ? "com_problema" : "rodando",
+        c.estado === "falhou" ? "Falhou" : c.estado === "concluida" ? "Concluída" : "Concluída com avisos"),
+        itens.length && c.estado !== "falhou" ? ` Copiado: ${itens.join(", ")}.` : "");
+      fim.replaceChildren(
+        c.erro ? h("p", { class: "form-erro" }, c.erro) : null,
+        c.avisos?.length ? h("details", { class: "avancado" }, h("summary", {}, `Avisos (${c.avisos.length})`),
+          h("ul", { class: "lista-explica" }, c.avisos.map((a) => h("li", {}, a)))) : null,
+        c.estado !== "falhou" ? h("p", { class: "nota" }, "Abra o sistema e entre com um usuário da origem. Se alguma tela não achar uma tabela nova, clique em Reiniciar na solução.") : null);
+    };
+    passo();
+  }
 }
 
 function mostrarAba(k) {

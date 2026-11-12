@@ -293,8 +293,25 @@ Login sem e-mail: cadastro ligado com confirmação automática (o Panorama cria
 dele); `SUPABASE_SMTP_*` no `.env` liga o envio de e-mail para todos. Linha de comando:
 `python -m marketplace supabase listar|conferir|subir|parar [ids]`.
 
-**Ainda não incluído** (próximas etapas): copiar os dados do Supabase da nuvem pela tela e o banco e
-os arquivos do Supabase no backup diário.
+**Copiar dados de outro Supabase** (ex.: o da nuvem): em **Gerenciar → Visão geral**, botão
+**Copiar dados de outro Supabase**. Informe o endereço do *Session pooler* da origem (servidor,
+porta, usuário `postgres.<id do projeto>`) e a senha do banco, e marque o que copiar:
+
+- **Tabelas e dados**: o esquema `public` inteiro (tabelas, dados, funções, gatilhos, regras RLS e
+  permissões), mais os gatilhos do sistema nas tabelas do login;
+- **Usuários do login** (`auth.users` e `auth.identities`, com as senhas), só com as colunas que
+  existem nos dois lados (versões diferentes do login);
+- **Buckets e regras dos arquivos**;
+- **Arquivos**: baixados da origem pela API dela (precisa da chave de serviço da origem) e enviados
+  para o Supabase local.
+
+O que vem **substitui** o que estiver no local; antes, o portal guarda uma cópia completa do banco
+local em `<pasta de backups>/supabase/<id>/antes-de-copiar-*.dump` (ficam as 3 últimas). A senha e
+a chave da origem só passam pela memória: não são gravadas nem aparecem no log. Tudo roda dentro do
+container do banco local, que já tem o `pg_dump`/`psql` da mesma versão. Pode repetir quando quiser
+(ex.: para trazer os dados mais novos antes de desligar a nuvem).
+
+**Ainda não incluído** (próxima etapa): o banco e os arquivos do Supabase no backup diário.
 
 **Quem usou a primeira versão** (`PORTAL_SUPABASE=sim`, containers `log20-supabase-*`, API na
 8111): ela não é mais usada nem atualizada. O `atualizar.sh` avisa e mostra como desligá-la; os
