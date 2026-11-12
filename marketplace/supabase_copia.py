@@ -104,9 +104,28 @@ def validar(dados: dict) -> tuple[Origem, dict[str, bool]]:
             url = f"https://{ref}.supabase.co" if re.fullmatch(r"[a-z0-9]{10,40}", ref) else ""
         if not URL_RE.match(url):
             raise ErroCopia("Para copiar os arquivos, informe o endereço do projeto de origem (https://<id>.supabase.co).")
-        if not dados.get("chave_servico"):
+        chave = str(dados.get("chave_servico") or "").strip()
+        if not chave:
             raise ErroCopia("Para copiar os arquivos, informe a chave de serviço (service_role) do projeto de origem.")
+        if chave.startswith("sb_publishable_") or _papel_jwt(chave) == "anon":
+            raise ErroCopia("Essa é a chave pública (anon/publishable): com ela a origem esconde os arquivos privados. "
+                            "Use a chave de serviço: Project Settings → API Keys → service_role (ou uma secret key, sb_secret_...).")
+        dados["chave_servico"] = chave
     return Origem(host, porta, usuario, str(dados["senha"]), banco, url, str(dados.get("chave_servico") or "")), partes
+
+
+def _papel_jwt(token: str) -> str:
+    """Papel (role) de uma chave JWT antiga do Supabase; '' se nao for JWT."""
+    partes = token.split(".")
+    if len(partes) != 3:
+        return ""
+    try:
+        import base64
+
+        corpo = json.loads(base64.urlsafe_b64decode(partes[1] + "=" * (-len(partes[1]) % 4)))
+        return str(corpo.get("role") or "")
+    except (ValueError, json.JSONDecodeError):
+        return ""
 
 
 @dataclass
@@ -513,15 +532,17 @@ def _copiar_arquivos(c: Copia, banco: _Banco, origem: Origem, seg) -> None:
     ok = falhas = 0
     for i, (bucket, nome, tipo) in enumerate(lista, 1):
         caminho = f"{urllib.parse.quote(bucket, safe='')}/{urllib.parse.quote(nome, safe='/')}"
+        # Chave nova (sb_secret_...) vai so em apikey; a antiga (JWT service_role) tambem no Authorization.
+        cab = {"apikey": origem.chave_servico}
+        if not origem.chave_servico.startswith("sb_"):
+            cab["Authorization"] = f"Bearer {origem.chave_servico}"
+        lado = "baixar da origem"
         try:
-            # Chave nova (sb_secret_...) vai so em apikey; a antiga (JWT service_role) tambem no Authorization.
-            cab = {"apikey": origem.chave_servico}
-            if not origem.chave_servico.startswith("sb_"):
-                cab["Authorization"] = f"Bearer {origem.chave_servico}"
-            req = urllib.request.Request(f"{origem.url}/storage/v1/object/{caminho}", headers=cab)
+            req = urllib.request.Request(f"{origem.url}/storage/v1/object/authenticated/{caminho}", headers=cab)
             with urllib.request.urlopen(req, timeout=120) as resp:
                 conteudo = resp.read()
                 tipo = tipo or resp.headers.get("Content-Type", "application/octet-stream")
+            lado = "enviar para o Supabase local"
             envio = urllib.request.Request(f"{local}/storage/v1/object/{caminho}", data=conteudo, method="POST", headers={
                 "Authorization": f"Bearer {seg.service}", "apikey": seg.service, "x-upsert": "true",
                 "Content-Type": tipo or "application/octet-stream"})
@@ -530,14 +551,22 @@ def _copiar_arquivos(c: Copia, banco: _Banco, origem: Origem, seg) -> None:
             ok += 1
         except urllib.error.HTTPError as exc:
             falhas += 1
-            detalhe = exc.read()[:200].decode("utf-8", "replace")
-            if exc.code in (401, 403) and ok == 0 and falhas == 1 and "storage/v1" in (exc.url or ""):
-                if origem.url in (exc.url or ""):
-                    raise ErroCopia(f"A origem recusou a chave de serviço ({exc.code}). Confira a service_role do projeto.") from exc
-            c.avisos.append(f"{bucket}/{nome}: {exc.code} {detalhe}")
+            detalhe = " ".join(exc.read()[:300].decode("utf-8", "replace").split())
+            msg = f"{bucket}/{nome}: erro ao {lado} ({exc.code}) {detalhe}"
+            if ok == 0 and falhas == 1:
+                # O primeiro ja falhou: quase sempre e o mesmo motivo para todos. Para e explica.
+                dica = ""
+                if lado.startswith("baixar") and exc.code in (400, 401, 403, 404):
+                    dica = (" A origem não entregou o arquivo: confira se a chave é a de serviço (service_role ou "
+                            f"sb_secret_...) do mesmo projeto e se o endereço {origem.url} é o desse projeto.")
+                raise ErroCopia(msg + dica) from exc
+            c.avisos.append(msg)
         except (urllib.error.URLError, OSError) as exc:
             falhas += 1
-            c.avisos.append(f"{bucket}/{nome}: {exc}")
+            msg = f"{bucket}/{nome}: erro ao {lado}: {exc}"
+            if ok == 0 and falhas == 1:
+                raise ErroCopia(msg) from exc
+            c.avisos.append(msg)
         if i % 20 == 0 or i == len(lista):
             c.registrar(f"Arquivos: {i} de {len(lista)} ({falhas} com erro).")
     c.resumo["arquivos"] = ok
