@@ -444,8 +444,7 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
                      if re.search(r"(?i)error", l) and "errors ignored on restore" not in l and "Command was:" not in l]
             inesperados = [e for e in erros if not any(x in e for x in ERROS_ESPERADOS)]
             if erros:
-                c.registrar(f"pg_restore: {len(erros) - len(inesperados)} aviso(s) esperado(s) "
-                            "(coisas que o Supabase local ja tem)" + (f", {len(inesperados)} outro(s)" if inesperados else "") + ".")
+                c.registrar(f"pg_restore: {len(erros) - len(inesperados)} aviso(s) esperado(s)" + (f", {len(inesperados)} outro(s)" if inesperados else "") + ".")
             for e in inesperados[:15]:
                 c.avisos.append(f"Tabelas: {e[:300]}")
             gatilhos = [l[0] for l in banco.origem_csv(SQL_GATILHOS) if l]
@@ -492,8 +491,7 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
         c.estado, c.erro = "falhou", str(exc)
         c.registrar(f"ERRO: {exc}")
         if c.resumo.get("seguranca"):
-            c.registrar("O Supabase local pode ter ficado pela metade. A cópia de segurança feita antes está em "
-                        f"{Path(c.resumo['seguranca']).name} (pasta de backups, supabase/{c.sid}).")
+            c.registrar(f"O Supabase local pode ter ficado incompleto. A cópia de segurança feita antes está em {Path(c.resumo['seguranca']).name} (pasta de backups, supabase/{c.sid}).")
         try:
             _Banco(c.sid, "", origem).local_cmd(["sh", "-c", f"rm -rf {ARQ}"])
         except Exception:  # noqa: BLE001
@@ -515,7 +513,7 @@ def _ligar_extensoes(c: Copia, banco: _Banco) -> None:
     faltam = sorted((n, e) for n, e in origem if n not in local)
     for nome, esquema in faltam:
         if nome not in disponiveis:
-            c.avisos.append(f"Extensão {nome}: existe na origem, mas não neste Supabase; o que depende dela não vem.")
+            c.avisos.append(f"Extensão {nome}: existe na origem, mas não neste Supabase. O que depende dela não será importado.")
             continue
         try:
             banco.local_sql(f'create schema if not exists "{esquema}";\ncreate extension if not exists "{nome}" with schema "{esquema}";')

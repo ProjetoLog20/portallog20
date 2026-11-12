@@ -177,7 +177,7 @@ def conferir(pasta_dados: Path, sid: str) -> list[str]:
     """Problemas nas chaves guardadas (assinatura que nao bate com o segredo, papel errado)."""
     seg = segredos(pasta_dados, sid, criar=False)
     if seg is None:
-        return ["ainda sem segredos (a pilha nunca foi criada)"]
+        return ["ainda sem segredos (nunca foi criado)"]
     problemas = []
     if not chave_valida(seg.anon, seg.jwt_secret, "anon"):
         problemas.append("chave anon nao confere com o segredo dos tokens")
@@ -419,8 +419,7 @@ def garantir(sid: str, url: str, pasta_dados: Path, rede_portal: str,
 
             livre_gb = shutil.disk_usage("/").free / 1024 ** 3
             if livre_gb < 5:
-                registrar(f"ATENCAO: so {livre_gb:.1f} GB livres no disco. As imagens do Supabase ocupam cerca de "
-                          "3 GB e o banco cresce com os dados; se faltar espaco, a criacao falha no meio.")
+                registrar(f"ATENCAO: so {livre_gb:.1f} GB livres no disco. As imagens do Supabase ocupam cerca de 3 GB e o banco cresce com os dados. Se faltar espaco, a criacao falha.")
         _garantir_rede(rede(sid), sid)
         mudou_algo = False
         for s in especificacao(sid, seg, url):

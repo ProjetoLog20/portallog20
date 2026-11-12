@@ -169,7 +169,7 @@ function painelSenha(titulo, senha, extra) {
     h("div", { class: "senha-linha" },
       h("code", {}, senha),
       h("button", { type: "button", class: "botao pequeno", onclick: (ev) => copiar(senha, ev.currentTarget) }, "Copiar")),
-    h("small", {}, extra || "Anote agora: ela não será mostrada de novo. No primeiro acesso a pessoa cria uma senha própria."));
+    h("small", {}, extra || "Anote agora: ela não será mostrada de novo. No primeiro acesso o usuário cria uma senha própria."));
 }
 
 /* ----- diálogos (elemento <dialog> nativo) ----- */
@@ -296,7 +296,7 @@ function telaLogin() {
           h("h1", {}, "Entrar no portal"),
           h("p", {}, "Use o usuário e a senha que o administrador passou para você."),
           form,
-          h("p", { class: "nota" }, "Esqueceu a senha? Peça ao administrador para redefinir.")))));
+          h("p", { class: "nota" }, "Esqueceu a senha? Entre em contato com o administrador.")))));
 }
 
 function telaSenha() {
@@ -304,7 +304,7 @@ function telaSenha() {
   const erro = h("p", { class: "form-erro", role: "alert", hidden: true });
   const form = h("form", { class: "painel form-estreito" },
     h("h1", {}, obrigatoria ? "Defina a sua senha" : "Trocar senha"),
-    obrigatoria ? h("p", { class: "nota" }, "Você entrou com uma senha temporária. Crie uma senha pessoal para continuar.") : null,
+    obrigatoria ? h("p", { class: "nota" }, "Seu acesso foi feito com uma senha temporária. Crie uma senha pessoal para continuar.") : null,
     h("div", { class: "campo" }, h("label", { for: "s-atual" }, obrigatoria ? "Senha temporária" : "Senha atual"),
       h("input", { id: "s-atual", name: "atual", type: "password", autocomplete: "current-password", required: true })),
     h("div", { class: "campo" }, h("label", { for: "s-nova" }, "Nova senha"),
@@ -356,8 +356,8 @@ async function telaMeusSistemas() {
         h("div", {},
           h("h1", {}, `Olá, ${eu.nome.split(" ")[0]}`),
           h("p", {}, eu.perfil === "admin"
-            ? "Como administrador, você vê todos os sistemas. Para instalar ou configurar, use Soluções."
-            : "Estes são os sistemas liberados para você. Cada um abre em uma nova aba.")),
+            ? "Como administrador, você vê todos os sistemas. Para instalar ou configurar, acesse o painel de Soluções."
+            : "Estes são os sistemas que você tem acesso.")),
         busca),
       h("div", { id: "grade-meus" }));
   }
@@ -369,8 +369,8 @@ function pintarMeusSistemas(sistemas) {
   if (!alvo) return;
   if (!sistemas.length) {
     alvo.replaceChildren(h("div", { class: "vazio" },
-      h("strong", {}, "Nenhum sistema liberado ainda"),
-      h("p", {}, "Peça ao administrador do portal para liberar os sistemas que você usa.")));
+      h("strong", {}, "Ainda sem acesso a nenhum sistema."),
+      h("p", {}, "Solicite ao administrador do portal para liberar os sistemas que você precisa.")));
     return;
   }
   const termo = normalizar(buscaSistemas);
@@ -431,7 +431,7 @@ function botoesAcao(sol, aoAgir, soPrincipal = false) {
       onclick: async (ev) => {
         if (acao === "remover" && !(await confirmar({
           titulo: "Remover o container?",
-          texto: `O container de ${sol.nome} será apagado. A imagem e os dados (volumes) continuam; dá para iniciar de novo depois.`,
+          texto: `O container de ${sol.nome} será apagado. A imagem e os dados não são alterados; pode ser iniciado novamente quando necessário.`,
           botao: "Remover container", perigo: true,
         }))) return;
         ev.target.disabled = true;
@@ -458,12 +458,12 @@ async function indicadorDocker() {
 async function telaSolucoes() {
   $conteudo.replaceChildren(
     h("section", { class: "intro intro-linha" },
-      h("div", {}, h("h1", {}, "Soluções"), h("p", {}, "Instale, inicie e acompanhe cada sistema publicado no portal.")),
+      h("div", {}, h("h1", {}, "Soluções"), h("p", {}, "Instale, inicie e gerencie cada sistema publicado no portal.")),
       h("div", { class: "intro-lado" },
         h("span", { id: "docker-slot" }),
         h("button", {
           type: "button", class: "botao",
-          title: "Lê de novo a pasta solucoes/ para incluir soluções novas ou alteradas",
+          title: "Consulta novamente a pasta solucoes/ para incluir soluções novas ou alteradas",
           onclick: async (ev) => {
             ev.currentTarget.disabled = true;
             const botao = ev.currentTarget;
@@ -534,7 +534,7 @@ async function atualizarSolucoes() {
       logoSistema(sol, "medio"),
       h("div", { class: "linha-solucao-info" },
         h("h2", {}, h("a", { href: `#/admin/solucao/${sol.id}` }, sol.nome),
-          sol.local ? h("span", { class: "etiqueta", title: "Criada pelo assistente neste servidor (fora do Git)" }, "Neste servidor") : null),
+          sol.local ? h("span", { class: "etiqueta", title: "Criada pelo assistente localmente" }, "Neste servidor") : null),
         h("p", {}, sol.resumo)),
       h("div", { class: "linha-solucao-estado" },
         pilula(sol.status.estado),
@@ -567,8 +567,8 @@ async function telaSolucao(id) {
       .map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]));
   const blocoLocal = sol.local
     ? h("div", { class: "bloco" },
-        h("h3", {}, "Levar para outros servidores"),
-        h("p", { class: "nota" }, `Esta solução só existe neste servidor. Para publicá-la nos outros, baixe o .zip, descompacte na raiz do repositório do portal (cria solucoes/${sol.id}/), faça o commit e remova esta cópia daqui.`),
+        h("h3", {}, "Migrar para outros servidores"),
+        h("p", { class: "nota" }, `Esta solução só existe neste servidor. Para publicá-la em outro, baixe o .zip, descompacte na raiz do repositório do portal (cria solucoes/${sol.id}/), faça o commit e remova esta cópia, se necessário.`),
         h("div", { class: "linha-botoes topo-8" },
           h("a", { class: "botao pequeno", href: `#/admin/editar-solucao/${sol.id}` }, "Editar"),
           h("button", { type: "button", class: "botao pequeno", onclick: () => baixarArquivosLocais(sol.id) }, "Baixar arquivos (.zip)"),
@@ -579,7 +579,7 @@ async function telaSolucao(id) {
 
   const demo = sol.acessos_demo.length
     ? h("div", { class: "bloco" },
-        h("h3", {}, "Acessos de demonstração"),
+        h("h3", {}, "Acessos de demonstração/teste"),
         h("table", { class: "tabela-simples" },
           h("thead", {}, h("tr", {}, h("th", {}, "Perfil"), h("th", {}, "Usuário"), h("th", {}, "Senha"))),
           h("tbody", {}, sol.acessos_demo.map((a) => h("tr", {}, h("td", {}, a.perfil), h("td", {}, h("code", {}, a.usuario)), h("td", {}, h("code", {}, a.senha)))))),
@@ -593,7 +593,7 @@ async function telaSolucao(id) {
     h("div", { class: "campo" },
       h("label", { for: "url-publica" }, "Endereço público"),
       h("input", { id: "url-publica", name: "url_publica", type: "text", value: sol.url_publica, placeholder: sol.url_padrao, autocomplete: "off" }),
-      h("small", {}, `Em branco usa ${sol.url_padrao}. Com domínio próprio, informe por exemplo https://rh.suaempresa.com.br.`)),
+      h("small", {}, `Deixe em branco para usar ${sol.url_padrao}. Com domínio próprio, informe por exemplo https://rh.dominio.com.br.`)),
     h("div", { class: "linha-botoes" }, h("button", { type: "submit", class: "botao" }, "Salvar endereço")));
   formEndereco.addEventListener("submit", async (ev) => {
     ev.preventDefault();
@@ -611,9 +611,9 @@ async function telaSolucao(id) {
       h("section", { class: "painel" }, h("h2", {}, "Ficha técnica"), ficha, blocoSupabase, blocoLocal)),
     config: h("div", { class: "aba-painel" },
       h("section", { class: "painel estreito" }, h("h2", {}, "Configurações"),
-        h("p", { class: "nota acima" }, "Viram variáveis de ambiente da solução. As mudanças valem depois de Reiniciar."), formConfig)),
+        h("p", { class: "nota acima" }, "Serão variáveis de ambiente da solução. As mudanças são aplicadas depois de Reiniciar."), formConfig)),
     acesso: h("div", { class: "aba-painel colunas" },
-      h("section", { class: "painel" }, h("h2", {}, "Quem acessa"), pessoas),
+      h("section", { class: "painel" }, h("h2", {}, "Quem pode acessar"), pessoas),
       h("section", { class: "painel" }, h("h2", {}, "Endereço"), formEndereco)),
     logs: h("div", { class: "aba-painel" },
       h("section", { class: "painel logs" },
@@ -621,7 +621,7 @@ async function telaSolucao(id) {
           h("div", { class: "abas-mini", role: "tablist", "aria-label": "Tipo de log" },
             [["operacao", "Operação do portal"], ["aplicacao", "Saída da aplicação"]].map(([aba, rotulo]) =>
               h("button", { type: "button", role: "tab", "data-aba": aba, onclick: () => { abaLogs = aba; pintarLogs(true); } }, rotulo))),
-          h("small", { class: "nota" }, "Atualiza sozinho enquanto a página está aberta.")),
+          h("small", { class: "nota" }, "Atualiza automaticamente enquanto a página está aberta.")),
         h("pre", { class: "saida", tabindex: "0" }, "Carregando…"))),
   };
 
@@ -673,18 +673,18 @@ function blocoSupabaseDetalhe(sol) {
       b.disabled = false;
       b.textContent = texto;
     },
-  }, est.studio_neste ? "Abrir o Studio" : "Abrir o Studio deste sistema") : null;
+  }, est.studio_neste ? "Abrir o Studio" : "Abrir o Studio desta solução") : null;
   return h("div", { class: "bloco bloco-supabase" },
-    h("h3", {}, "Supabase do sistema"),
-    h("p", { class: "nota" }, "Banco, login e arquivos só deste sistema, no mesmo endereço dele (/rest/v1, /auth/v1 e /storage/v1), "
-      + "atrás do login do portal. O portal preenche sozinho:"),
+    h("h3", {}, "Supabase da solução"),
+    h("p", { class: "nota" }, "Banco, login e arquivos desta aplicação ficam no mesmo endereço (/rest/v1, /auth/v1 e /storage/v1), "
+      + "atrás do login do portal. O portal preenche automaticamente:"),
     h("ul", { class: "lista-variaveis" }, sb.variaveis.map((v) => h("li", {}, h("code", {}, v.nome), h("span", {}, v.conteudo)))),
-    est && !est.criado ? h("p", { class: "nota" }, "Ainda não criado: é criado no primeiro Iniciar (baixa as imagens; leva alguns minutos).") : partes,
-    est?.criado && !est.no_ar ? h("p", { class: "nota" }, "Fora do ar: clique em Reiniciar na solução.") : null,
-    h("p", { class: "nota" }, "Os dados ficam nos volumes ", h("code", {}, `log20-sb-${sol.id}-*`), ": reiniciar, atualizar ou remover o container não os apaga."),
+    est && !est.criado ? h("p", { class: "nota" }, "Ainda não criado: é criado na primeira inicialização (baixa as imagens e isso pode levar alguns minutos).") : partes,
+    est?.criado && !est.no_ar ? h("p", { class: "nota" }, "Fora do ar. Tente Reiniciar a solução.") : null,
+    h("p", { class: "nota" }, "Os dados ficam no servidor. Reiniciar, atualizar ou remover o container não os apaga."),
     est?.no_ar ? h("div", { class: "linha-botoes topo-8" }, botaoStudio,
-      h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoCopiarSupabase(sol) }, "Copiar dados de outro Supabase")) : null,
-    sb.studio && !est?.no_ar ? h("p", { class: "nota" }, "O Studio (painel do banco) abre quando o Supabase estiver no ar.") : null);
+      h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoCopiarSupabase(sol) }, "Importar dados de outra base (Supabase)")) : null,
+    sb.studio && !est?.no_ar ? h("p", { class: "nota" }, "O Studio (painel de administração do banco) abre quando o Supabase estiver no ar.") : null);
 }
 
 /** Copiar tabelas, usuários, regras e arquivos de outro Supabase (ex.: o da nuvem). */
@@ -693,7 +693,7 @@ async function dialogoCopiarSupabase(sol) {
   try { atual = (await api(`/api/solucoes/${sol.id}/supabase/copiar`)).copia; } catch { /* sem cópia anterior */ }
   const corpo = h("div", {});
   const rodape = h("div", { class: "linha-botoes" });
-  const dlg = dialogo({ titulo: "Copiar dados de outro Supabase", descricao: sol.nome, corpo, rodape, largo: true });
+  const dlg = dialogo({ titulo: "Importar dados de outra base (Supabase)", descricao: sol.nome, corpo, rodape, largo: true });
   if (atual?.estado === "executando") { acompanhar(); return; }
 
   const campo = (id, rotulo, extra = {}, ajuda = "") => h("div", { class: "campo" },
@@ -701,23 +701,23 @@ async function dialogoCopiarSupabase(sol) {
   const marca = (nome, rotulo, ajuda, marcado = true) => h("label", { class: "campo-check" },
     h("input", { type: "checkbox", name: nome, checked: marcado }), h("span", {}, h("strong", {}, rotulo), h("small", {}, ` ${ajuda}`)));
   const blocoArquivos = h("div", { class: "form-grade", hidden: true },
-    campo("cp-url", "Endereço do projeto de origem", { type: "text", placeholder: "https://<id>.supabase.co" }, "Em branco: tirado do usuário (postgres.<id>)."),
-    campo("cp-chave", "Chave de serviço da origem", { type: "password" }, "Project Settings → API Keys: service_role (ou secret). Não é guardada."));
+    campo("cp-url", "Endereço do projeto de origem", { type: "text", placeholder: "https://<id>.supabase.co" }, "Em branco: obtido do usuário (postgres.<id>)."),
+    campo("cp-chave", "Chave de serviço da origem", { type: "password" }, "Project Settings → API Keys: service_role (ou secret)."));
   const form = h("form", { id: "form-copiar", class: "config" },
-    h("p", { class: "nota acima" }, "O que vier substitui o que estiver no Supabase deste sistema. Antes, o portal guarda uma cópia de segurança dele na pasta de backups."),
+    h("p", { class: "nota acima" }, "O que for importado irá substituir o que estiver no banco desta solução. Antes da substituição, o portal guarda uma cópia de segurança dos dados na pasta de backups."),
     h("div", { class: "form-grade" },
       campo("cp-host", "Servidor", { type: "text", required: true, placeholder: "aws-1-sa-east-1.pooler.supabase.com" }),
       campo("cp-porta", "Porta", { type: "number", value: "5432", required: true }),
       campo("cp-usuario", "Usuário", { type: "text", required: true, placeholder: "postgres.<id do projeto>" })),
     h("div", { class: "form-grade" },
       campo("cp-senha", "Senha do banco de origem", { type: "password", required: true, autocomplete: "new-password" },
-        "Só é usada nesta cópia: não fica gravada em lugar nenhum.")),
-    h("small", { class: "sem-topo" }, "No painel da Supabase: Connect → Session pooler (o “Direct connection” só funciona por IPv6). A senha é a do banco: Project Settings → Database."),
+        "Usada apenas nesta cópia.")),
+    h("small", { class: "sem-topo" }, "No painel da Supabase: Connect → Session pooler. A senha é a do banco: Project Settings → Database."),
     h("div", { class: "escolhas-copia" },
       marca("tabelas", "Tabelas e dados", "Esquema public inteiro: tabelas, dados, funções, gatilhos e regras (RLS)."),
-      marca("usuarios", "Usuários do login", "Com as mesmas senhas. Copie junto com as tabelas: elas costumam apontar para os usuários."),
-      marca("storage", "Buckets e regras dos arquivos", "Os buckets e quem pode ler e gravar em cada um."),
-      marca("arquivos", "Arquivos", "Baixa cada arquivo da origem e envia para cá. Precisa da chave de serviço da origem.", false)),
+      marca("usuarios", "Usuários do login", "Com as mesmas senhas. Devem ser copiadas junto com as tabelas."),
+      marca("storage", "Buckets e regras dos arquivos", "Os buckets e quem pode ler e salvar em cada um."),
+      marca("arquivos", "Arquivos", "Baixa cada arquivo da origem. Precisa da chave de serviço da origem.", false)),
     blocoArquivos,
     campo("cp-confirma", `Para confirmar, digite ${sol.id}`, { type: "text", required: true }));
   form.querySelector("[name=arquivos]").addEventListener("change", (ev) => {
@@ -754,7 +754,7 @@ async function dialogoCopiarSupabase(sol) {
       pre.textContent = c.log;
       pre.scrollTop = pre.scrollHeight;
       if (c.estado === "executando") {
-        etapa.replaceChildren(h("span", { class: "girando", "aria-hidden": "true" }), ` ${c.etapa || "Trabalhando"}… Pode fechar esta janela: a cópia continua.`);
+        etapa.replaceChildren(h("span", { class: "girando", "aria-hidden": "true" }), ` ${c.etapa || "Trabalhando nisso"}… Essa janela pode ser fechada, a cópia continua mesmo assim.`);
         setTimeout(passo, 2000);
         return;
       }
@@ -768,7 +768,7 @@ async function dialogoCopiarSupabase(sol) {
         c.erro ? h("p", { class: "form-erro" }, c.erro) : null,
         c.avisos?.length ? h("details", { class: "avancado" }, h("summary", {}, `Avisos (${c.avisos.length})`),
           h("ul", { class: "lista-explica" }, c.avisos.map((a) => h("li", {}, a)))) : null,
-        c.estado !== "falhou" ? h("p", { class: "nota" }, "Abra o sistema e entre com um usuário da origem. Se alguma tela não achar uma tabela nova, clique em Reiniciar na solução.") : null);
+        c.estado !== "falhou" ? h("p", { class: "nota" }, "Abra o sistema e entre com um usuário válido. Se algum problema ocorrer, clique em Reiniciar na solução.") : null);
     };
     passo();
   }
@@ -805,22 +805,22 @@ function montarFormulario(form, sol) {
     return;
   }
   if (sol.configuracoes.some((c) => c.construcao)) {
-    form.append(h("p", { class: "nota acima" }, "Campos \u201cNa construção\u201d são gravados no sistema quando ele é compilado (ex.: sites Vite ou React): depois de mudar, clique em Atualizar, não em Reiniciar."));
+    form.append(h("p", { class: "nota acima" }, "Campos “Na construção” são gravados no sistema quando ele é criado (ex.: sites Vite ou React): depois de mudar, é preciso Atualizar, não apenas Reiniciar para aplicar as alterações."));
   }
   for (const c of sol.configuracoes) {
     const idCampo = `cfg-${c.nome}`;
     if (c.gerenciada) {
       form.append(h("div", { class: "campo" },
-        h("label", { for: idCampo }, c.rotulo, h("span", { class: "etiqueta" }, "Preenchido pelo portal")),
-        h("input", { id: idCampo, type: "text", disabled: true, value: "", placeholder: "Vem do Supabase do sistema (Visão geral)" }),
-        h("small", {}, "O portal preenche este valor com o Supabase próprio da solução; não precisa digitar.")));
+        h("label", { for: idCampo }, c.rotulo, h("span", { class: "etiqueta" }, "Preenchido automaticamente")),
+        h("input", { id: idCampo, type: "text", disabled: true, value: "", placeholder: "Obtido do Supabase do sistema (Visão geral)" }),
+        h("small", {}, "Este valor é preenchido automaticamente com o Supabase próprio da solução.")));
       continue;
     }
     const limpar = c.tipo === "segredo" && c.definido
       ? h("button", {
           type: "button", class: "link-limpar",
           onclick: async () => {
-            if (!(await confirmar({ titulo: "Apagar o valor salvo?", texto: `${c.rotulo}: o valor guardado no portal será apagado.`, botao: "Apagar valor", perigo: true }))) return;
+            if (!(await confirmar({ titulo: "Apagar o valor salvo?", texto: `${c.rotulo}: o valor salvo no portal será apagado.`, botao: "Apagar valor", perigo: true }))) return;
             await api(`/api/solucoes/${sol.id}/configuracoes/${c.nome}`, { method: "DELETE" });
             montarFormulario(form, await api(`/api/solucoes/${sol.id}`));
             toast("Valor apagado. Reinicie a solução para aplicar.");
@@ -837,7 +837,7 @@ function montarFormulario(form, sol) {
         h("label", { for: idCampo }, c.rotulo,
           c.tipo === "segredo" ? h("span", { class: "etiqueta" }, c.definido ? "Definido" : "Vazio") : null,
           c.obrigatoria && !c.definido ? h("span", { class: "etiqueta obrigatoria" }, "Obrigatório") : null,
-          c.construcao ? h("span", { class: "etiqueta", title: "Gravado no sistema na construção: muda só depois de Atualizar" }, "Na construção") : null),
+          c.construcao ? h("span", { class: "etiqueta", title: "Gravado no sistema no momento da criação. A alteração só é aplicada depois de Atualizar" }, "Na criação") : null),
         h("input", {
           id: idCampo, name: c.nome, autocomplete: "off",
           type: c.tipo === "segredo" ? "password" : "text",
@@ -849,7 +849,7 @@ function montarFormulario(form, sol) {
   const restaurarBanco = sol.campos_banco?.length ? h("button", {
     type: "button", class: "botao sutil",
     onclick: async () => {
-      if (!(await confirmar({ titulo: "Usar o banco do servidor?", texto: `Os campos ${sol.campos_banco.join(", ")} voltam a apontar para o banco desta solução no PostgreSQL do servidor. Os dados do banco não mudam.`, botao: "Usar o banco do servidor" }))) return;
+      if (!(await confirmar({ titulo: "Usar o banco do servidor?", texto: `Os campos ${sol.campos_banco.join(", ")} voltam a apontar para o banco desta solução no PostgreSQL do servidor. Os dados do banco não são alterados.`, botao: "Usar o banco do servidor" }))) return;
       try {
         const r = await api(`/api/solucoes/${sol.id}/banco/restaurar`, { method: "POST" });
         montarFormulario(form, await api(`/api/solucoes/${sol.id}`));
@@ -957,7 +957,7 @@ async function telaUsuarios() {
   });
   $conteudo.replaceChildren(
     h("section", { class: "intro intro-linha" },
-      h("div", {}, h("h1", {}, "Usuários"), h("p", {}, "Quem pode entrar no portal. Para escolher quem vê cada sistema, use também Acessos.")),
+      h("div", {}, h("h1", {}, "Usuários"), h("p", {}, "Quem pode entrar no portal. Para escolher quem vê cada sistema, use o painel de Acessos.")),
       h("div", { class: "intro-lado" },
         h("button", { type: "button", class: "botao", onclick: dialogoImportar }, "Importar em lote"),
         h("button", { type: "button", class: "botao primario", onclick: () => dialogoUsuario(null) }, "Novo usuário"))),
@@ -1008,7 +1008,7 @@ function pintarUsuarios() {
     h("td", { class: "col-acoes" }, h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoUsuario(u) }, "Editar")))));
   if (!lista.length) {
     corpo.append(h("tr", {}, h("td", { colspan: "6", class: "vazio-linha" },
-      dados.usuarios.length ? "Ninguém encontrado com esse filtro." : "Nenhum usuário cadastrado.")));
+      dados.usuarios.length ? "Nenhum usuário encontrado com esse filtro." : "Nenhum usuário cadastrado.")));
   }
   const todos = document.getElementById("marcar-todos");
   const marcadosVisiveis = lista.filter((u) => selecionados.has(u.id)).length;
@@ -1048,7 +1048,7 @@ function dialogoAcessoEmMassa(sel, conceder) {
   const dlg = dialogo({
     titulo: `${verbo} sistemas`,
     descricao: `${conceder ? "Para" : "De"} ${plural(comuns.length, "pessoa selecionada", "pessoas selecionadas")}.`
-      + (comuns.length < sel.length ? ` Administradores ficam de fora: eles já veem todos os sistemas.` : ""),
+      + (comuns.length < sel.length ? ` Administradores não são afetados. Eles já veem todos os sistemas.` : ""),
     corpo: [escolha.el, erro],
     rodape: [
       h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"),
@@ -1061,7 +1061,7 @@ function dialogoAcessoEmMassa(sel, conceder) {
           try {
             const r = await api("/api/acessos", { method: "POST", body: { usuarios: comuns.map((u) => u.id), solucoes, conceder } });
             dlg.close();
-            toast(r.alterados ? `${conceder ? "Acesso liberado" : "Acesso retirado"}: ${plural(r.alterados, "permissão alterada", "permissões alteradas")}.` : "Nada mudou: as pessoas já estavam assim.");
+            toast(r.alterados ? `${conceder ? "Acesso liberado" : "Acesso retirado"}: ${plural(r.alterados, "permissão alterada", "permissões alteradas")}.` : "Nenhuma configuração alterada.");
             await carregarUsuarios(); pintarUsuarios();
           } catch (e) { erro.textContent = e.message; erro.hidden = false; ev.currentTarget.disabled = false; }
         },
@@ -1074,7 +1074,7 @@ async function mudarSituacao(sel, ativo) {
   const alvos = sel.filter((u) => u.ativo !== ativo);
   if (!ativo && !(await confirmar({
     titulo: `Desativar ${plural(alvos.length, "usuário", "usuários")}?`,
-    texto: "Essas pessoas saem do portal na hora e não conseguem entrar de novo até serem reativadas. Os acessos liberados ficam guardados.",
+    texto: "Essas pessoas são desconectadas do portal na hora e não conseguem entrar de novo até serem reativadas. Os acessos liberados ficam guardados.",
     botao: "Desativar", perigo: true,
   }))) return;
   try {
@@ -1099,7 +1099,7 @@ function dialogoUsuario(u) {
         h("input", { id: "u-nome", name: "nome", type: "text", value: u?.nome || "", required: true, autocomplete: "off", maxlength: 120 })),
       h("div", { class: "campo" }, h("label", { for: "u-usuario" }, "Login"),
         h("input", { id: "u-usuario", name: "usuario", type: "text", value: u?.usuario || "", required: true, disabled: !novo, autocomplete: "off", pattern: "[a-zA-Z0-9._@\\-]{3,60}" }),
-        h("small", {}, novo ? "Ex.: maria.silva ou a matrícula. Não muda depois." : "O login não pode ser alterado."))),
+        h("small", {}, novo ? "Ex.: maria.silva ou a matrícula. Não é alterado depois." : "O login não pode ser alterado."))),
     h("fieldset", { class: "grupo-campos" },
       h("legend", {}, "Perfil"),
       h("div", { class: "opcoes-perfil" },
@@ -1125,7 +1125,7 @@ function dialogoUsuario(u) {
 
   const redefinir = novo || u.id === eu.id ? null : h("button", {
     type: "button", class: "botao sutil", onclick: async () => {
-      if (!(await confirmar({ titulo: `Redefinir a senha de ${u.nome}?`, texto: "A senha atual deixa de valer e a pessoa sai do portal. Você recebe uma senha temporária para passar a ela.", botao: "Redefinir senha" }))) return;
+      if (!(await confirmar({ titulo: `Redefinir a senha de ${u.nome}?`, texto: "A senha atual deixa de ser válida e o usuário é desconectado do portal. Uma senha temporária é gerada para que o usuário possa acessar.", botao: "Redefinir senha" }))) return;
       try {
         const r = await api(`/api/usuarios/${u.id}/redefinir-senha`, { method: "POST" });
         dlg.close();
@@ -1141,7 +1141,7 @@ function dialogoUsuario(u) {
 
   const dlg = dialogo({
     titulo: novo ? "Novo usuário" : u.nome,
-    descricao: novo ? "A pessoa recebe uma senha temporária e cria a própria senha no primeiro acesso." : `Criado em ${quando(u.criado_em, true)} · último acesso: ${quando(u.ultimo_login)}`,
+    descricao: novo ? "O usuário recebe uma senha temporária e cria a própria senha no primeiro acesso." : `Criado em ${quando(u.criado_em, true)} · último acesso: ${quando(u.ultimo_login)}`,
     corpo: form,
     rodape: [
       redefinir, h("span", { class: "espaco" }),
@@ -1235,7 +1235,7 @@ function dialogoImportar() {
     criar.disabled = !itens.length || comErro.length > 0;
     criar.textContent = itens.length && !comErro.length ? `Criar ${plural(prontos, "usuário", "usuários")}` : "Criar usuários";
     resumo.replaceChildren(!itens.length ? "Cole a lista ou escolha um arquivo para ver a prévia."
-      : comErro.length ? h("span", { class: "texto-erro" }, `${plural(comErro.length, "linha precisa", "linhas precisam")} de ajuste. Corrija no texto acima; nada é criado enquanto houver erro.`)
+      : comErro.length ? h("span", { class: "texto-erro" }, `${plural(comErro.length, "linha precisa", "linhas precisam")} de ajuste. Corrija no texto acima. Só é possível criar quando os erros forem corrigidos.`)
         : `${plural(prontos, "pessoa pronta", "pessoas prontas")} para criar.`);
     previa.replaceChildren(itens.length ? h("table", { class: "tabela-simples" },
       h("thead", {}, h("tr", {}, ["Linha", "Login", "Nome", "Perfil", ""].map((t) => h("th", {}, t)))),
@@ -1265,8 +1265,8 @@ function dialogoImportar() {
       h("div", { class: "campo" },
         h("label", { for: "lote-texto" }, "Lista de pessoas"),
         texto,
-        h("small", { id: "lote-ajuda" }, "Uma pessoa por linha: login; nome; perfil. O perfil é opcional (padrão: usuário). "
-          + "Pode colar direto do Excel, com as colunas nessa ordem.")),
+        h("small", { id: "lote-ajuda" }, "Uma pessoa por linha: login, nome, perfil. O perfil é opcional (padrão: usuário). "
+          + "É possível colar direto do Excel, com as colunas nessa ordem.")),
       h("div", { class: "linha-botoes" },
         h("label", { for: "lote-arquivo", class: "botao pequeno" }, "Abrir arquivo CSV"), arquivo,
         h("button", { type: "button", class: "botao pequeno sutil", onclick: () => baixarCsv("modelo-usuarios.csv", [["login", "nome", "perfil"], ["maria.silva", "Maria Silva", "usuario"], ["10452", "Ana Paula Lima", "usuario"]]) }, "Baixar modelo"))),
@@ -1277,7 +1277,7 @@ function dialogoImportar() {
 
   const dlg = dialogo({
     titulo: "Importar usuários em lote",
-    descricao: "Cada pessoa recebe uma senha temporária. Você baixa a lista com as senhas no fim.",
+    descricao: "Cada pessoa recebe uma senha temporária. O download da lista com as senhas é feito no final.",
     corpo, largo: true,
     rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), criar],
   });
@@ -1311,12 +1311,12 @@ function dialogoResultadoLote(criados, solucoes) {
   let baixou = false;
   const dlg = dialogo({
     titulo: `${plural(criados.length, "usuário criado", "usuários criados")}`,
-    descricao: nomesSol.length ? `Com acesso a ${nomesSol.join(", ")}.` : "Sem sistemas liberados ainda: use Acessos para liberar.",
+    descricao: nomesSol.length ? `Com acesso a ${nomesSol.join(", ")}.` : "Sem sistemas liberados ainda. Use o painel de Acessos para liberar.",
     largo: true,
     corpo: [
       h("div", { class: "senha-temp" },
-        h("strong", {}, "Guarde as senhas agora"),
-        h("small", {}, "Elas não serão mostradas de novo. Entregue cada senha só à pessoa dona do login e apague o arquivo depois. No primeiro acesso cada um cria a própria senha.")),
+        h("strong", {}, "Salve as senhas agora"),
+        h("small", {}, "Elas não serão mostradas de novo. Entregue cada senha somente à pessoa dona do login e apague o arquivo depois. No primeiro acesso cada um cria a própria senha.")),
       h("div", { class: "tabela-rolagem limite" }, h("table", { class: "tabela-simples" },
         h("thead", {}, h("tr", {}, h("th", {}, "Login"), h("th", {}, "Nome"), h("th", {}, "Senha temporária"))),
         h("tbody", {}, criados.map((c) => h("tr", {}, h("td", {}, h("code", {}, c.usuario)), h("td", {}, c.nome), h("td", {}, h("code", { class: "senha" }, c.senha_temporaria))))))),
@@ -1328,7 +1328,7 @@ function dialogoResultadoLote(criados, solucoes) {
       h("button", {
         type: "button", class: "botao primario",
         onclick: async () => {
-          if (!baixou && !(await confirmar({ titulo: "Fechar sem baixar as senhas?", texto: "Depois de fechar, só dá para gerar senhas novas com Redefinir senha, uma pessoa por vez.", botao: "Fechar mesmo assim" }))) return;
+          if (!baixou && !(await confirmar({ titulo: "Fechar sem baixar as senhas?", texto: "Depois de fechar, só é possível gerar senhas novas com Redefinir senha, uma pessoa por vez.", botao: "Fechar mesmo assim" }))) return;
           dlg.close();
         },
       }, "Concluir"),
@@ -1348,7 +1348,7 @@ async function telaAcessos() {
   $conteudo.replaceChildren(
     h("section", { class: "intro" },
       h("h1", {}, "Acessos"),
-      h("p", {}, "Marque quem pode abrir cada sistema. A mudança vale na hora, sem precisar salvar.")),
+      h("p", {}, "Marque quem pode abrir cada sistema. A mudança é aplicada imediatamente.")),
     h("div", { class: "abas", role: "tablist" }, abas.map(([k, rotulo]) =>
       h("button", { type: "button", role: "tab", "aria-selected": String(estadoAcessos.aba === k), onclick: () => { estadoAcessos.aba = k; telaAcessos(); } }, rotulo))),
     h("div", { id: "acessos-corpo" }, h("p", { class: "nota" }, "Carregando…")));
@@ -1481,7 +1481,7 @@ function baixarArquivosLocais(id) {
 async function removerLocal(sol) {
   if (!(await confirmar({
     titulo: `Remover ${sol.nome} do catálogo?`,
-    texto: "O manifesto criado pelo assistente é apagado deste servidor. Antes, pare e remova o container. Os volumes e o banco da solução não são apagados.",
+    texto: "O manifesto criado automaticamente é apagado deste servidor. Antes, pare e remova o container. Os volumes e o banco da solução não são apagados.",
     botao: "Remover do catálogo", perigo: true,
   }))) return;
   try {
@@ -1526,7 +1526,7 @@ function telaNovaSolucao() {
     const botao = form.querySelector("button[type=submit]");
     botao.disabled = true;
     botao.replaceChildren(h("span", { class: "giro", "aria-hidden": "true" }), "Baixando e analisando…");
-    resultado.replaceChildren(h("p", { class: "nota" }, "Baixando o código e procurando a tecnologia. Pode levar até um minuto em repositórios grandes."));
+    resultado.replaceChildren(h("p", { class: "nota" }, "Baixando o código e procurando a tecnologia. Pode demorar em repositórios grandes."));
     try {
       const an = await api("/api/assistente/analisar", {
         method: "POST", body: { repositorio: form.repositorio.value.trim(), ref: form.ref.value.trim() || "main", subpasta: form.subpasta.value.trim() },
@@ -1539,14 +1539,14 @@ function telaNovaSolucao() {
       erro.hidden = false;
     } finally {
       botao.disabled = false;
-      botao.textContent = "Analisar de novo";
+      botao.textContent = "Analisar novamente";
     }
   });
   $conteudo.replaceChildren(
     h("a", { class: "voltar", href: "#/admin/solucoes" }, "Todas as soluções"),
     h("section", { class: "intro" },
       h("h1", {}, "Nova solução"),
-      h("p", {}, "Informe o repositório: o portal baixa o código, descobre a tecnologia, prepara o Dockerfile e aponta o que precisa de ajuste. Nada é instalado até você confirmar.")),
+      h("p", {}, "Informe o repositório: o portal baixa o código, identifica a tecnologia, prepara o Dockerfile e aponta o que precisa de ajuste. Nada é instalado sem confirmação.")),
     h("section", { class: "painel estreito" }, h("h2", {}, "1. Repositório"), form),
     resultado);
   form.repositorio.focus();
@@ -1572,7 +1572,7 @@ function painelDeteccao(an, titulo) {
         h("strong", { class: "deteccao-valor" }, an.nome_tecnologia),
         h("small", {}, an.evidencias.length ? `Pelos arquivos: ${an.evidencias.join(", ")}` : "")),
       h("div", {},
-        h("span", { class: "deteccao-rotulo" }, "Como vai rodar"),
+        h("span", { class: "deteccao-rotulo" }, "Como irá rodar"),
         h("strong", { class: "deteccao-valor" }, an.comando || "—"),
         h("small", {}, an.tem_dockerfile ? "Usa o Dockerfile do repositório." : an.dockerfile ? "Dockerfile gerado pelo portal (revise abaixo)." : "")),
       h("div", {},
@@ -1613,7 +1613,7 @@ function tabelaConfiguracoes(lista, banco) {
     const padrao = h("input", { type: "text", value: c.padrao || "", "aria-label": "Valor padrão", placeholder: "sem padrão" });
     const obrig = h("input", { type: "checkbox", checked: !!c.obrigatoria, "aria-label": "Obrigatória" });
     const constr = h("input", { type: "checkbox", checked: !!c.construcao || PREFIXO_CONSTRUCAO.test(c.nome || ""),
-      "aria-label": "Entra na construção", title: "Entra no sistema na construção (Vite, React, Next...): muda só depois de Atualizar" });
+      "aria-label": "Incluído na criação", title: "Incluído no sistema na criação (Vite, React, Next...): a alteração é aplicada depois de Atualizar" });
     nome.addEventListener("input", () => { if (PREFIXO_CONSTRUCAO.test(nome.value.trim())) constr.checked = true; });
     const sincronizar = () => { padrao.disabled = tipo.value === "segredo"; if (padrao.disabled) padrao.value = ""; };
     tipo.addEventListener("change", sincronizar);
@@ -1628,8 +1628,8 @@ function tabelaConfiguracoes(lista, banco) {
   };
   lista.forEach(novaLinha);
   const el = h("div", { class: "campo" },
-    h("label", {}, "Configurações que o sistema lê"),
-    h("small", { class: "sem-topo" }, "Cada linha vira um campo em Gerenciar → Configurações, onde o administrador preenche o valor. Segredos nunca aparecem na tela. Marque Obrigatória quando o sistema não sobe sem ela, e Construção quando o valor é gravado no sistema ao compilar (Vite, React, Next): aí ele só muda depois de Atualizar."),
+    h("label", {}, "Configurações lidas pelo sistema"),
+    h("small", { class: "sem-topo" }, "Cada linha se torna um campo da solução em Gerenciar → Configurações, onde o administrador pode alterar o valor. É Obrigatória quando o sistema não inicia sem ela, e Construção quando o valor é gravado no sistema quando ele é criado (Vite, React, Next): nesse caso, os valores só são aplicados depois de Atualizar."),
     h("div", { class: "tabela-rolagem limite" },
       h("table", { class: "tabela-simples tabela-cfg" },
         h("thead", {}, h("tr", {}, ["Usar", "Variável", "Tipo", "Valor padrão", "Obrig.", "Construção"].map((x) => h("th", {}, x)))),
@@ -1659,7 +1659,7 @@ function formularioSolucao(v, { modo, aoSalvar }) {
   const dockerfile = v.tem_dockerfile && !v.dockerfile ? null : h("textarea", { id: "ns-dockerfile", class: "codigo", rows: 16, spellcheck: false }, v.dockerfile || "");
   const notaArquivos = h("span", {});
   const pintarNota = () => notaArquivos.replaceChildren(Object.keys(arquivos).length
-    ? ` Junto vão os arquivos auxiliares ${Object.keys(arquivos).join(", ")} (usados nas linhas COPY --from=portal).` : "");
+    ? ` Juntamente irão os arquivos auxiliares ${Object.keys(arquivos).join(", ")}.` : "");
   pintarNota();
   const tabela = tabelaConfiguracoes(v.configuracoes || [], v.usar_banco ? v.banco : null);
   const usarBanco = v.banco ? h("label", { class: "campo-check" },
@@ -1676,46 +1676,46 @@ function formularioSolucao(v, { modo, aoSalvar }) {
     h("label", { class: "campo-check" },
       h("input", { type: "checkbox", id: "ns-supabase", checked: !!v.usar_supabase }),
       h("span", {}, h("strong", {}, "Criar um Supabase só para este sistema"),
-        h("small", {}, " Banco, login e arquivos próprios, no servidor, no mesmo endereço do sistema. O portal preenche as variáveis abaixo sozinho; o banco começa vazio."))),
+        h("small", {}, " Banco, login e arquivos próprios, no servidor, no mesmo endereço do sistema. O portal preenche as variáveis abaixo sozinho. O banco inicia vazio."))),
     h("div", { class: "form-grade" },
       campoSb("url", "Variável do endereço", "Recebe o endereço do sistema (ex.: VITE_SUPABASE_URL)."),
       campoSb("chave_anon", "Variável da chave pública", "Recebe a chave anon (ex.: VITE_SUPABASE_ANON_KEY)."),
-      campoSb("chave_servico", "Chave de serviço (opcional)", "Só para código que roda no servidor; nunca num site estático.")))
+      campoSb("chave_servico", "Chave de serviço (opcional)", "Só para código que roda no servidor. Nunca deve ser usada em um site estático.")))
     : null;
 
   const form = h("form", { class: "config", id: "ns-form" },
     h("div", { class: "form-grade" },
       campo("ns-nome", "Nome", v.nome, { required: true, maxlength: 120 }),
       campo("ns-id", "Identificador", v.id, modo === "editar" ? { disabled: true } : { required: true, pattern: "[a-z0-9][a-z0-9\\-]{1,40}" },
-        modo === "editar" ? "Não muda depois de criado." : "Minúsculas e hífens. Vira o nome do container; não muda depois."),
+        modo === "editar" ? "Não é alterado depois de criado." : "Minúsculas e hífens. Vira o nome do container. Não é alterado posteriormente."),
       campo("ns-categoria", "Área", v.categoria, { maxlength: 60 }, "Ex.: Recursos Humanos, Operação, Financeiro.")),
-    campo("ns-resumo", "Resumo", v.resumo, { maxlength: 200 }, "Uma frase sobre o que o sistema faz. Aparece em Meus sistemas."),
+    campo("ns-resumo", "Resumo", v.resumo, { maxlength: 200 }, "Uma frase sobre o que o sistema faz. Aparece para os usuários em Meus sistemas."),
     h("div", { class: "form-grade" },
-      campo("ns-porta-host", "Porta pública", v.porta_host, { type: "number" }, modo === "editar" ? "Mudar a porta muda o endereço do sistema." : "A primeira livre da faixa do servidor."),
-      campo("ns-porta", "Porta da aplicação", v.porta_container, { type: "number" }, "Onde o sistema escuta dentro do container."),
+      campo("ns-porta-host", "Porta pública", v.porta_host, { type: "number" }, modo === "editar" ? "Mudar a porta muda o endereço da solução." : "A primeira livre da faixa do servidor."),
+      campo("ns-porta", "Porta da aplicação", v.porta_container, { type: "number" }, "Onde o sistema é acessado dentro do container."),
       campo("ns-saude", "Rota de saúde", v.caminho_saude, {}, "O portal testa esta rota para saber se está no ar.")),
     usarBanco,
     usarSupabase,
     h("label", { class: "campo-check" },
       h("input", { type: "checkbox", id: "ns-construcao", checked: !!v.variaveis_na_construcao }),
       h("span", {}, h("strong", {}, "Site estático: todas as variáveis entram na construção"),
-        h("small", {}, " Para sites Vite, React ou Vue servidos como arquivos: nada lê variável quando o site está no ar, então as variáveis fixas e todas as configurações vão para o build. Mudou um valor? Clique em Atualizar."))),
+        h("small", {}, " Para sites Vite, React ou Vue, nada lê variável quando o site está no ar, então as variáveis fixas e todas as configurações vão para o build (momento da criação). Sempre que alterar um valor, clique em Atualizar."))),
     tabela.el,
     dockerfile ? h("div", { class: "campo" },
       h("label", { for: "ns-dockerfile" }, "Dockerfile"),
       dockerfile,
-      h("small", {}, "Fica guardado no portal: o repositório de quem desenvolveu não muda. Ajuste se precisar.", notaArquivos))
+      h("small", {}, "Fica guardado no portal sem alterações no repositório de origem.", notaArquivos))
       : h("p", { class: "nota" }, "Usa o Dockerfile do repositório."),
     h("details", { class: "avancado" },
       h("summary", {}, "Variáveis fixas, volumes e segredos gerados"),
       h("div", { class: "config topo-16" },
         h("div", { class: "campo" }, h("label", { for: "ns-amb" }, "Variáveis de ambiente fixas"),
           h("textarea", { id: "ns-amb", class: "codigo", rows: 4, spellcheck: false }, paraLinhas(v.ambiente)),
-          h("small", {}, "Uma por linha, NOME=valor. {url} vira o endereço público e {host}, só o IP ou nome. Ninguém edita estas depois; para isso, use a tabela acima.")),
+          h("small", {}, "Uma por linha, NOME=valor. {url} vira o endereço público e {host}, só o IP ou nome. Não é possível editar depois. Para isso, use a tabela acima.")),
         h("div", { class: "campo" }, h("label", { for: "ns-vol" }, "Pastas que guardam dados (volumes)"),
           h("textarea", { id: "ns-vol", class: "codigo", rows: 2, spellcheck: false }, paraLinhas(v.volumes)),
-          h("small", {}, "Uma por linha, apelido=/caminho/no/container. O resto do container é refeito a cada atualização.")),
-        campo("ns-segredos", "Segredos gerados pelo portal", (v.segredos || []).join(", "), {}, "Nomes separados por vírgula (ex.: SECRET_KEY). Valor aleatório, criado uma vez, nunca aparece na tela."))),
+          h("small", {}, "Uma por linha, nome=/caminho/no/container. O resto do container é refeito a cada atualização.")),
+        campo("ns-segredos", "Segredos gerados pelo portal", (v.segredos || []).join(", "), {}, "Nomes separados por vírgula (ex.: SECRET_KEY). Valor aleatório, criado uma vez que nunca aparece na tela."))),
     erro,
     h("div", { class: "linha-botoes" },
       h("button", { type: "submit", class: "botao primario" }, modo === "editar" ? "Salvar alterações" : "Criar solução"),
@@ -1771,7 +1771,7 @@ function pintarAnalise(alvo, an) {
   if (!an.suportado) {
     alvo.replaceChildren(cabecalho, h("div", { class: "vazio" },
       h("strong", {}, "Este projeto não pode ser preparado automaticamente"),
-      h("p", {}, "Peça a quem desenvolveu um Dockerfile, ou confira se o branch e a subpasta estão certos.")));
+      h("p", {}, "Um Dockerfile é necessário ou confira se o branch e a subpasta estão certos.")));
     return;
   }
   const v = valoresDaAnalise(an);
@@ -1781,7 +1781,7 @@ function pintarAnalise(alvo, an) {
   });
   const temErro = an.avisos.some((a) => a.nivel === "erro");
   alvo.replaceChildren(cabecalho, h("section", { class: "painel" }, h("h2", {}, "3. Revise e crie"),
-    temErro ? h("p", { class: "texto-erro topo-ajuste" }, "Há itens para resolver: dá para criar e testar, mas não use com dados reais antes de corrigir.") : null,
+    temErro ? h("p", { class: "texto-erro topo-ajuste" }, "Existem problemas para resolver. É possível criar e testar, mas não é recomendado usar com dados reais antes das correções.") : null,
     form));
 }
 
@@ -1807,15 +1807,15 @@ async function telaEditarSolucao(id) {
         pintarReanalise(reanalise, an, aplicarAnalise(an));
       } catch (e) { toast(e.message, "erro"); }
       b.disabled = false;
-      b.textContent = "Analisar de novo";
+      b.textContent = "Analisar novamente";
     },
-  }, "Analisar de novo");
+  }, "Analisar novamente");
   const repo = v.repositorio.replace(/^https:\/\//, "").replace(/\.git$/, "");
   $conteudo.replaceChildren(
     h("a", { class: "voltar", href: `#/admin/solucao/${id}` }, v.nome),
     h("section", { class: "intro intro-linha" },
       h("div", {}, h("h1", {}, `Editar ${v.nome}`),
-        h("p", {}, `${repo} · ${v.ref}${v.subpasta ? ` · ${v.subpasta}/` : ""}. As mudanças valem no próximo Reiniciar (ou Atualizar, se o Dockerfile mudar).`)),
+        h("p", {}, `${repo} · ${v.ref}${v.subpasta ? ` · ${v.subpasta}/` : ""}. As mudanças serão aplicadas na próxima vez que Reiniciar (ou Atualizar, se o Dockerfile mudar) a solução.`)),
       h("div", { class: "intro-lado" }, botaoReanalisar)),
     reanalise,
     h("section", { class: "painel" }, h("h2", {}, "Dados da solução"), form));
@@ -1833,27 +1833,27 @@ function pintarReanalise(alvo, an, ap) {
         let n = 0;
         for (const { c, caixa } of marcas) if (caixa.checked) { ap.adicionar(c); n += 1; }
         ev.currentTarget.disabled = true;
-        toast(`${plural(n, "configuração adicionada", "configurações adicionadas")} à tabela. Salve para valer.`);
+        toast(`${plural(n, "configuração adicionada", "configurações adicionadas")} à tabela. Salve para aplicar.`);
       } }, "Adicionar as marcadas")));
   }
   if (ap.siteEstatico) {
     itens.push(h("div", { class: "bloco" },
-      h("h3", {}, "É um site estático: as variáveis precisam entrar na construção"),
-      h("p", { class: "nota" }, "Num site Vite/React servido como arquivos, nada lê variável quando ele está no ar: os valores são gravados no site ao compilar. Marque para o portal passar as variáveis fixas e as configurações para o build."),
+      h("h3", {}, "É um site estático. As variáveis precisam entrar na construção"),
+      h("p", { class: "nota" }, "Para sites Vite, React ou Vue, nada lê variável quando o site está no ar, então as variáveis fixas e todas as configurações vão para o build (momento da criação). Marque para o portal passar as variáveis fixas e as configurações para o build."),
       h("button", { type: "button", class: "botao pequeno", onclick: (ev) => { ap.marcarSiteEstatico(); ev.currentTarget.disabled = true; toast("Marcado. Salve e depois clique em Atualizar."); } }, "Marcar site estático")));
   }
   if (ap.paraConstrucao.length) {
     itens.push(h("div", { class: "bloco" },
       h("h3", {}, "Configurações lidas na construção"),
-      h("p", { class: "nota" }, `${ap.paraConstrucao.join(", ")}: o código lê na hora de compilar, então o valor só chega ao sistema pelo build.`),
+      h("p", { class: "nota" }, `${ap.paraConstrucao.join(", ")}: o código lê na hora de criar a solução, então o valor só chega ao sistema pelo build.`),
       h("button", { type: "button", class: "botao pequeno", onclick: (ev) => { ap.marcarConstrucao(); ev.currentTarget.disabled = true; toast("Marcadas. Salve e depois clique em Atualizar."); } }, "Marcar para a construção")));
   }
   if (ap.dockerNovo) {
     itens.push(h("div", { class: "bloco" },
       h("h3", {}, "O Dockerfile sugerido mudou"),
-      h("p", { class: "nota" }, "O código mudou desde a criação (ex.: dependências ou tecnologia). Você pode trocar o Dockerfile guardado pelo sugerido agora; o seu atual se perde se você salvar."),
+      h("p", { class: "nota" }, "O código mudou desde a criação (ex.: dependências ou tecnologia). Você pode trocar o Dockerfile guardado pelo sugerido agora. O atual se perde se você salvar."),
       h("details", {}, h("summary", {}, "Ver o sugerido"), h("pre", { class: "saida curta" }, an.dockerfile)),
-      h("button", { type: "button", class: "botao pequeno topo-8", onclick: (ev) => { ap.usarDockerfile(); ev.currentTarget.disabled = true; toast("Dockerfile trocado no formulário. Salve para valer."); } }, "Usar o Dockerfile sugerido")));
+      h("button", { type: "button", class: "botao pequeno topo-8", onclick: (ev) => { ap.usarDockerfile(); ev.currentTarget.disabled = true; toast("Dockerfile alterado no formulário. Salve para valer."); } }, "Usar o Dockerfile sugerido")));
   }
   alvo.replaceChildren(
     painelDeteccao(an, "Análise do código mais recente"),
@@ -1865,7 +1865,7 @@ function pintarReanalise(alvo, an, ap) {
 function pintarCriada(alvo, r, dados) {
   alvo.replaceChildren(h("section", { class: "painel criada" },
     h("h2", {}, `${dados.nome} está no catálogo`),
-    h("p", {}, `Criada neste servidor, na porta ${dados.porta_host}. O próximo passo é instalar: o portal baixa o código, constrói a imagem e sobe o sistema.`),
+    h("p", {}, `Criada neste servidor, na porta ${dados.porta_host}. O próximo passo é instalar. O portal baixa o código, constrói a imagem e sobe o sistema.`),
     h("div", { class: "linha-botoes" },
       h("button", {
         type: "button", class: "botao primario", onclick: async (ev) => {
@@ -1918,7 +1918,7 @@ async function telaBackups() {
   $conteudo.replaceChildren(
     h("section", { class: "intro intro-linha" },
       h("div", {}, h("h1", {}, "Backups"),
-        h("p", {}, "Cópias dos bancos das soluções, das pastas de dados e dos dados do portal. O backup só lê: nada do que está em uso é alterado.")),
+        h("p", {}, "Cópias dos bancos das soluções, das pastas de dados e dos dados do portal.")),
       h("div", { class: "intro-lado" }, h("button", { type: "button", class: "botao primario", id: "backup-agora", onclick: fazerBackupAgora }, "Fazer backup agora"))),
     h("div", { id: "backup-alerta" }),
     h("div", { class: "grade-backup", id: "backup-resumo" }),
@@ -1968,7 +1968,7 @@ function pintarResumoBackup() {
   const ultimo = d.backups.find((b) => !b.parcial);
   const copia = d.copia
     ? cartao("Segunda cópia", d.ajustes.copiar ? "Ligada" : "Desligada", "Pasta:", null, d.copia)
-    : cartao("Segunda cópia", "Não configurada", "Uma cópia em outro disco ou na rede protege contra perder a VM. Veja Ajustes.");
+    : cartao("Segunda cópia", "Não configurada", "Uma cópia em outro disco ou na rede protege contra perda de dados. Veja Ajustes.");
   document.getElementById("backup-resumo").replaceChildren(
     cartao("Último backup", ultimo ? dataIso(ultimo.criado_em) : "Nenhum",
       ultimo ? `${MOTIVOS_BACKUP[ultimo.motivo] || ultimo.motivo} · ${tamanho(ultimo.bytes)}` : "Clique em Fazer backup agora.",
@@ -2036,12 +2036,12 @@ function pintarListaBackups() {
       h("td", {}, situacao, verif ? h("div", { class: "sub" }, `Conferido ${dataIso(verif.em, true).toLowerCase()}`) : null),
       h("td", { class: "acoes-backup" },
         restauraveis.length ? h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoRestaurar(b, restauraveis, nomes) }, "Restaurar…") : null,
-        h("button", { type: "button", class: "botao pequeno sutil", title: "Restaura cada banco num banco de teste e confere os arquivos, sem mexer no que está em uso",
+        h("button", { type: "button", class: "botao pequeno sutil", title: "Restaura cada banco num banco de teste e confere os arquivos, sem alterar o que está em uso",
           onclick: () => acaoBackup(`/api/backups/${b.nome}/verificar`, "POST", null, "Conferência iniciada.") }, "Conferir"),
         h("button", { type: "button", class: "botao pequeno sutil", title: b.fixado ? "Volta a seguir a limpeza automática" : "Nunca é apagado pela limpeza automática",
-          onclick: () => acaoBackup(`/api/backups/${b.nome}/fixar`, "PUT", { fixado: !b.fixado }, b.fixado ? "Backup desfixado." : "Backup fixado: não será apagado.") }, b.fixado ? "Desfixar" : "Fixar"),
+          onclick: () => acaoBackup(`/api/backups/${b.nome}/fixar`, "PUT", { fixado: !b.fixado }, b.fixado ? "Backup desfixado." : "Backup fixado. Não será apagado.") }, b.fixado ? "Desfixar" : "Fixar"),
         b.fixado ? null : h("button", { type: "button", class: "link-limpar", onclick: async () => {
-          if (!(await confirmar({ titulo: "Apagar este backup?", texto: `${dataIso(b.criado_em)} (${tamanho(b.bytes)}). Não dá para desfazer.`, botao: "Apagar backup", perigo: true }))) return;
+          if (!(await confirmar({ titulo: "Apagar este backup?", texto: `${dataIso(b.criado_em)} (${tamanho(b.bytes)}). Não é possível desfazer.`, botao: "Apagar backup", perigo: true }))) return;
           acaoBackup(`/api/backups/${b.nome}`, "DELETE", null, "Backup apagado.");
         } }, "Apagar")));
   });
@@ -2090,8 +2090,8 @@ function dialogoRestaurar(b, restauraveis, nomes) {
     h("div", { class: "campo" }, h("label", { for: "rest-sol" }, "Solução"), sel),
     h("div", { class: "campo" }, h("label", {}, "O que voltar"), partes),
     h("ul", { class: "lista-explica" },
-      h("li", {}, "Antes, o portal faz um backup de segurança desta solução (aparece na lista)."),
-      h("li", {}, "A solução é parada; se estava no ar, volta sozinha no fim."),
+      h("li", {}, "Antes, o portal faz um backup de segurança desta solução."),
+      h("li", {}, "A solução é parada. Se estava no ar, volta automaticamente."),
       h("li", {}, "O banco é restaurado numa cópia e só substitui o atual se tudo der certo."),
       h("li", {}, h("strong", {}, "Tudo o que foi gravado depois deste backup se perde."))),
     h("div", { class: "campo" }, rotuloConf, confirmacao));
@@ -2176,14 +2176,14 @@ function pintarImportar() {
 
   alvo.replaceChildren(
     h("section", { class: "painel" },
-      h("h2", {}, "Trazer dados de fora para uma solução"),
-      h("p", { class: "nota sem-topo" }, "Por exemplo, o banco da máquina de quem desenvolveu o sistema, ou as planilhas que ele já tinha. Primeiro o arquivo é enviado e conferido; nada muda até você escolher a solução e confirmar."),
+      h("h2", {}, "Importar dados para uma solução"),
+      h("p", { class: "nota sem-topo" }, "Por exemplo, o banco da máquina de quem desenvolveu o sistema, ou as planilhas que ele já tinha. Primeiro o arquivo é enviado e conferido, alterações só são efetivadas após a confirmação."),
       entrada, zona, barra, estado,
       h("details", { class: "como-gerar" },
         h("summary", {}, "Como gerar o arquivo do banco"),
         h("p", {}, "Na máquina onde o banco está hoje (PowerShell ou terminal):"),
         h("pre", { class: "saida curta" }, "pg_dump -h localhost -U <usuario> -d <banco> --no-owner --no-privileges -f banco.sql"),
-        h("p", { class: "nota" }, `Use o SQL puro (.sql): ele funciona mesmo se o PostgreSQL de lá for mais novo que o do servidor${d.importacao_versao ? ` (${d.importacao_versao})` : ""}. O .dump (pg_dump -Fc) só abre se a versão de lá for igual ou mais antiga. Se esquecer o --no-owner, o portal ignora as linhas de dono e permissão.`))),
+        h("p", { class: "nota" }, `Use o SQL puro (.sql). Ele funciona mesmo se o PostgreSQL da máquina de quem desenvolveu for mais novo que o do servidor${d.importacao_versao ? ` (${d.importacao_versao})` : ""}. O .dump (pg_dump -Fc) só abre se a versão de lá for igual ou mais antiga. Se esquecer o --no-owner, o portal ignora as linhas de dono e permissão.`))),
     h("div", { id: "lista-importacoes" }));
   pintarImportacoes();
 }
@@ -2238,8 +2238,8 @@ function cartaoImportacao(imp, destacado) {
     imp.avisos.length ? h("ul", { class: "avisos-lista" }, imp.avisos.map((a) => h("li", { class: "aviso-item atencao" }, h("p", {}, a)))) : null,
     h("div", { class: "form-grade" }, h("div", { class: "campo" }, h("label", {}, "Solução"), sel), campoPasta),
     h("p", { class: "nota" }, banco
-      ? "O banco atual da solução é substituído pelo do arquivo. Antes, o portal faz um backup de segurança; a importação vai primeiro para um banco temporário e só troca se tudo der certo. A solução é parada e, se estava no ar, volta no fim (as migrations completam o que faltar)."
-      : "Antes, o portal faz um backup de segurança da solução. A solução é parada e, se estava no ar, volta no fim."),
+      ? "O banco atual da solução é substituído pelo do arquivo. Antes, o portal faz um backup de segurança. A importação vai primeiro para um banco temporário e só ocorre a substituição se tudo der certo. A solução é parada e, se estava no ar, volta automaticamente."
+      : "Antes, o portal faz um backup de segurança da solução. A solução é parada e, se estava no ar, volta automaticamente."),
     h("div", { class: "campo" }, rotuloConf, conf),
     h("div", { class: "linha-botoes" }, botao));
   form.addEventListener("submit", async (ev) => {
@@ -2303,7 +2303,7 @@ function pintarAjustesBackup() {
       check("copiar", "Gravar uma segunda cópia", d.copia ? `Em ${d.copia}.` : "Indisponível: defina PORTAL_BACKUP_COPIA_HOST no .env do servidor (ex.: uma pasta de rede montada na VM) e rode deploy/atualizar.sh.", { disabled: !d.copia }),
       h("div", { class: "campo" }, h("label", { for: "aj-webhook" }, "Avisar quando falhar (opcional)"),
         h("input", { type: "url", id: "aj-webhook", name: "aviso_webhook", value: aj.aviso_webhook, placeholder: "https://…" }),
-        h("small", {}, "Endereço de webhook (ex.: um fluxo do Teams ou do Power Automate) que recebe { \"text\": \"…\" } quando um backup falha."))),
+        h("small", {}, "Endereço de webhook (ex.: um fluxo do Teams ou do Power Automate) que recebe { \"text\": \"…\" } quando um backup falha. Serve para automatizar informes de erro."))),
     h("div", { class: "linha-botoes" },
       h("button", { type: "submit", class: "botao primario" }, "Salvar ajustes"),
       d.personalizado ? h("button", { type: "button", class: "botao sutil", onclick: async () => {
@@ -2494,7 +2494,7 @@ async function telaUso() {
       h("p", { class: "nota sem-topo" }, "Valores de agora, o pico das últimas 24 horas e o espaço em disco de cada sistema. Os gráficos acima mostram a mesma informação ao longo do tempo."),
       h("div", { id: "uso-tabela" })),
     h("div", { class: "uso-rodape" },
-      h("section", { class: "painel" }, h("h2", {}, "Onde está o espaço em disco"), h("div", { id: "uso-disco" })),
+      h("section", { class: "painel" }, h("h2", {}, "Espaço em disco"), h("div", { id: "uso-disco" })),
       h("section", { class: "painel" }, h("h2", {}, "Reinícios e falta de memória"), h("div", { id: "uso-eventos" }))));
   pintarUso(true);
 }
@@ -2517,7 +2517,7 @@ function pintarUso(graficos) {
 
   // Alertas: o que precisa de atenção agora.
   const alertas = [];
-  if (fracDisco >= 0.85) alertas.push(`Disco da VM ${porcento(fracDisco)} cheio (${bytesTexto(maq.disco_livre)} livres).${recuperavel > 1024 ** 3 ? " Dá para liberar espaço no botão abaixo." : ""}`);
+  if (fracDisco >= 0.85) alertas.push(`Disco da VM ${porcento(fracDisco)} cheio (${bytesTexto(maq.disco_livre)} livres).${recuperavel > 1024 ** 3 ? " Libere espaço no servidor usando o botão abaixo." : ""}`);
   if (fracMem >= 0.9) alertas.push(`Memória da VM ${porcento(fracMem)} usada. Considere limites menores ou mais memória para a VM.`);
   for (const a of solucoes) {
     const lim = a.limites.memoria_mb * 1024 ** 2;
@@ -2536,7 +2536,7 @@ function pintarUso(graficos) {
     cartao("Memória da VM", `${bytesTexto(maq.mem_usada)} de ${bytesTexto(maq.mem_total)}`, `${porcento(fracMem)} em uso${maq.swap_usada > 64 * 1024 ** 2 ? ` · ${bytesTexto(maq.swap_usada)} em swap` : ""}`, medidor(fracMem, { atencao: 0.8, critico: 0.92 })),
     cartao("CPU da VM", porcento(fracCpu), `Carga média de 1 min: ${maq.carga[0].toLocaleString("pt-BR")} em ${nucleos(maq.cpus)}`, medidor(fracCpu, { atencao: 0.7, critico: 0.9 })),
     cartao("Disco da VM", `${bytesTexto(maq.disco_livre)} livres`, `${bytesTexto(maq.disco_usado)} de ${bytesTexto(maq.disco_total)} em uso`, medidor(fracDisco, { atencao: 0.8, critico: 0.92 })),
-    cartao("Espaço que dá para liberar", bytesTexto(recuperavel), "Cache de construção e imagens antigas do Docker. Dados e bancos não são tocados.",
+    cartao("Espaço que é possível liberar", bytesTexto(recuperavel), "Cache de construção e imagens antigas do Docker. Dados e bancos não são impactados.",
       h("button", { type: "button", class: "botao pequeno", disabled: recuperavel < 50 * 1024 ** 2, onclick: liberarEspaco }, "Liberar")));
 
   if (graficos) pintarGraficosUso();
@@ -2607,13 +2607,13 @@ function pintarTabelaUso() {
     return h("tr", { class: sol ? "" : "linha-infra" },
       h("th", { scope: "row" }, h("span", { class: "nome-sistema" }, a.nome),
         sol ? h("div", { class: "sub" }, pilula(a.status.estado, a.status.detalhe))
-          : h("div", { class: "sub" }, a.id.startsWith("supabase:") ? "Banco, login e arquivos do sistema (6 containers)" : "Infraestrutura do portal")),
+          : h("div", { class: "sub" }, a.id.startsWith("supabase:") ? "Banco, login e arquivos do sistema" : "Infraestrutura do portal")),
       h("td", {}, a.mem != null ? h("div", { class: "valor-uso" },
           h("strong", {}, bytesTexto(a.mem)), sol ? h("span", {}, ` de ${mbTexto(limMem)}`) : null) : h("span", { class: "sub" }, "Parado"),
         fracMem != null ? medidor(fracMem, { atencao: 0.8, critico: 0.9 }) : null,
         // Container criado antes dos limites (ou com outro valor): o limite configurado ainda não vale.
         sol && a.rodando && limMem && a.mem_limite_docker && Math.abs(a.mem_limite_docker - limMem * 1024 ** 2) > 8 * 1024 ** 2
-          ? h("div", { class: "sub alerta-limite" }, "Limite ainda não aplicado: clique em Limites e Salvar (vale na hora)") : null),
+          ? h("div", { class: "sub alerta-limite" }, "Limite ainda não aplicado: clique em Limites e Salvar (aplicado instantaneamente)") : null),
       h("td", { class: "num" }, a.pico_mem_24h ? bytesTexto(a.pico_mem_24h) : "—"),
       h("td", {}, a.cpu != null ? h("div", { class: "valor-uso" },
           h("strong", {}, a.cpu.toLocaleString("pt-BR", { maximumFractionDigits: 2 })), h("span", {}, sol ? ` de ${nucleos(a.limites.cpus)}` : " núcleo")) : "—"),
@@ -2686,7 +2686,7 @@ function dialogoLimites(a) {
     h("ul", { class: "lista-explica" },
       h("li", {}, `Agora: memória ${mbTexto(lim.memoria_mb)} (${origem[lim.origem_memoria_mb]}), CPU ${nucleos(lim.cpus)} (${origem[lim.origem_cpus]}).`),
       h("li", {}, "Passou do limite de memória: o sistema é reiniciado sozinho (aparece em Reinícios). Passou do de CPU: ele só fica mais lento."),
-      h("li", {}, "Vale na hora, sem reiniciar, quando o sistema está no ar.")));
+      h("li", {}, "Aplicado instantaneamente, sem reiniciar, quando o sistema está no ar.")));
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     botao.disabled = true;
@@ -2740,7 +2740,7 @@ async function seguirDestino() {
         if (sistema.disponivel) { location.href = alvo.href; return; }
         setTimeout(() => toast(eu?.perfil === "admin"
           ? `${sistema.nome} está fora do ar. Inicie-o em Soluções.`
-          : `${sistema.nome} está fora do ar no momento. Tente de novo mais tarde.`), 300);
+          : `${sistema.nome} está fora do ar no momento. Tente novamente mais tarde.`), 300);
       }
     } catch { /* destino inválido: segue para o início */ }
   }

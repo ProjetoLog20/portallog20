@@ -160,17 +160,17 @@ ajuda = "No pooler do Supabase o usuário vem com o código do projeto: postgres
 nome = "DB_PASSWORD"
 rotulo = "Banco PostgreSQL: senha"
 tipo = "segredo"
-ajuda = "Pode ter qualquer símbolo: não precisa codificar."
+ajuda = "Pode ter qualquer símbolo, não precisa codificar."
 
 [[configuracoes]]
 nome = "DB_SSLMODE"
 rotulo = "Banco PostgreSQL: SSL"
 tipo = "texto"
 padrao = "require"
-ajuda = "require para Supabase e bancos na nuvem; disable para um PostgreSQL local sem SSL."
+ajuda = "require para Supabase e bancos na nuvem ou disable para um PostgreSQL local sem SSL."
 
 [[configuracoes]]
 nome = "DATABASE_URL"
-rotulo = "Banco PostgreSQL: string de conexão (alternativa)"
+rotulo = "Banco PostgreSQL: string de conexão"
 tipo = "segredo"
 ajuda = "Opcional, no lugar dos campos acima: postgresql://usuario:senha@servidor:5432/banco?sslmode=require. Símbolos na senha precisam ser codificados (# vira %23)."

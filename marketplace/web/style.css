@@ -884,3 +884,74 @@ body:has(.barra-selecao:not([hidden])) .toast { bottom: 92px; }
 .escolhas-copia { display: grid; gap: 8px; margin: 14px 0; }
 .etapa-copia { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0; }
 .girando { width: 14px; height: 14px; border: 2px solid var(--linha-forte); border-top-color: var(--petroleo); border-radius: 50%; animation: giro .8s linear infinite; display: inline-block; }
+
+/* ===================== acabamento =====================
+   Ajustes finos de profundidade, ritmo e resposta ao toque. Nada muda de lugar: só sombras
+   discretas nas superfícies, transições curtas, cabeçalhos de tabela mais limpos e títulos
+   com o mesmo peso em todas as telas. */
+:root {
+  --sombra-1: 0 1px 2px rgba(16, 40, 48, .05), 0 1px 3px rgba(16, 40, 48, .04);
+  --sombra-2: 0 4px 12px rgba(16, 40, 48, .08), 0 1px 3px rgba(16, 40, 48, .05);
+  --sombra-3: 0 24px 48px rgba(0, 29, 40, .22), 0 4px 12px rgba(0, 29, 40, .12);
+  --transicao: .15s ease;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sombra-1: 0 1px 2px rgba(0, 0, 0, .35);
+    --sombra-2: 0 6px 16px rgba(0, 0, 0, .4);
+    --sombra-3: 0 24px 56px rgba(0, 0, 0, .6);
+  }
+}
+
+/* Cabeçalho: uma sombra leve separa o menu do conteúdo ao rolar. */
+.topo { box-shadow: 0 2px 10px rgba(0, 41, 58, .08); }
+.menu a { transition: color var(--transicao), background-color var(--transicao); }
+
+/* Títulos de página com o mesmo desenho em todas as telas. */
+.intro h1, .cabecalho h1 { font-size: 26px; letter-spacing: -0.02em; }
+.intro p, .cabecalho p { font-size: 15px; line-height: 1.5; }
+
+/* Superfícies: borda mais suave e sombra discreta. */
+.painel, .tile, .lista-solucoes {
+  box-shadow: var(--sombra-1);
+}
+.painel h2 { font-size: 16px; letter-spacing: -0.01em; }
+
+/* Cartões de sistema: levantam um pouco ao passar o mouse. */
+.tile { transition: border-color var(--transicao), box-shadow var(--transicao), transform var(--transicao); }
+a.tile:hover { box-shadow: var(--sombra-2); transform: translateY(-2px); }
+.tile.fora { box-shadow: none; }
+
+/* Linhas da lista de soluções: realce suave ao passar o mouse. */
+.linha-solucao { transition: background-color var(--transicao); }
+.linha-solucao:hover { background: var(--superficie-2); }
+
+/* Botões: resposta visual ao passar o mouse e ao clicar. */
+.botao { transition: background-color var(--transicao), border-color var(--transicao), color var(--transicao), box-shadow var(--transicao); }
+.botao:not(.sutil):not(:disabled) { box-shadow: 0 1px 2px rgba(16, 40, 48, .06); }
+.botao.primario:not(:disabled):hover { box-shadow: 0 2px 6px rgba(0, 58, 77, .25); }
+.botao:not(:disabled):active { transform: translateY(1px); box-shadow: none; }
+.filtro { transition: background-color var(--transicao), border-color var(--transicao), color var(--transicao); }
+
+/* Tabelas: cabeçalho em versalete pequeno, como em relatórios. */
+th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.tabela thead th { padding-top: 11px; padding-bottom: 11px; border-bottom-color: var(--linha-forte); }
+.tabela tbody tr td { transition: background-color var(--transicao); }
+
+/* Campos: transição no foco e cantos iguais aos botões. */
+.campo input, .campo select, .campo textarea { transition: border-color var(--transicao), box-shadow var(--transicao); }
+.campo input:hover:not(:disabled):not(:focus), .campo select:hover:not(:focus), .campo textarea:hover:not(:focus) { border-color: var(--suave); }
+
+/* Abas: o texto não selecionado fica um pouco mais discreto. */
+.abas > button { transition: color var(--transicao); }
+
+/* Janelas: sombra mais funda e fundo com leve desfoque. */
+.dialogo { box-shadow: var(--sombra-3); }
+.dialogo::backdrop { backdrop-filter: blur(2px); }
+
+/* Mensagens rápidas: mesma sombra das janelas, mais leve. */
+.toast { box-shadow: var(--sombra-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  a.tile:hover, .botao:active { transform: none; }
+}

@@ -250,7 +250,7 @@ def api_verificar(request: Request, solucao: str):
             return RedirectResponse(destino, status_code=302)
         if navegacao:
             return _pagina_aviso("Entre no portal primeiro",
-                                 "Este sistema só abre para quem está conectado ao Portal de Soluções.", 401)
+                                 "Este sistema só é exibido para quem está conectado ao Portal de Soluções.", 401)
         return JSONResponse({"detail": "Sessao do portal expirada. Entre novamente."}, status_code=401)
     if solucao not in ger().solucoes or not AUTH.pode_acessar(usuario, solucao):
         if navegacao:
@@ -436,7 +436,7 @@ def api_configurar(sid: str, valores: dict = Body(..., embed=True), _: Usuario =
                 if (sol.variaveis_na_construcao or c.na_construcao) and c.nome in valores]
     if de_build:
         return {"ok": True, "acao": "reconstruir",
-                "aviso": f"{', '.join(de_build)} entra(m) no sistema na construcao: clique em Atualizar para valer."}
+                "aviso": f"{', '.join(de_build)} entra(m) no sistema na criação. Atualize-o para valer."}
     return {"ok": True, "acao": "iniciar", "aviso": "Reinicie a solucao para aplicar as mudancas."}
 
 
@@ -594,8 +594,8 @@ def api_assistente_editar(sid: str, dados: dict = Body(..., embed=True), autor: 
 
     mudou_build = do_build(antes) != do_build(depois)
     AUTH.registrar(autor, "Editou solução do assistente", sid)
-    return {**r, "aviso": "Para valer, clique em Atualizar: o Dockerfile, a origem do código ou as variáveis da construção mudaram." if mudou_build
-            else "Para valer, clique em Reiniciar.", "acao": "reconstruir" if mudou_build else "iniciar"}
+    return {**r, "aviso": "Para aplicar, clique em Atualizar: o Dockerfile, a origem do código ou as variáveis da construção mudaram." if mudou_build
+            else "Para aplicar, clique em Reiniciar.", "acao": "reconstruir" if mudou_build else "iniciar"}
 
 
 @app.get("/api/solucoes/{sid}/arquivos-locais.zip", include_in_schema=False)
@@ -621,7 +621,7 @@ def api_remover_local(sid: str, autor: Usuario = Depends(exigir_admin)) -> dict:
     """Tira do catalogo uma solucao criada pelo assistente (o container e os dados precisam ser removidos antes)."""
     sol = ger().solucoes.get(sid)
     if sol is not None and not sol.local:
-        raise HTTPException(400, "Esta solução vem do repositório do portal; remova o manifesto pelo Git.")
+        raise HTTPException(400, "Esta solução vem do repositório do portal. Remova o manifesto pelo Git.")
     if sol is not None and docker_cli.status().ok and docker_cli.container_inspect(sol.container):
         raise HTTPException(409, "Remova o container antes (Parar e depois Remover container).")
     try:
@@ -1073,10 +1073,10 @@ def api_recursos(sid: str, memoria: str | int | None = Body(None, embed=True), c
         raise HTTPException(400, str(exc)) from exc
     maquina_mb = (USO.atual()["maquina"].get("mem_total") or 0) // (1024 * 1024)
     if mem and maquina_mb and mem > maquina_mb:
-        raise HTTPException(400, f"A VM tem {maquina_mb} MB de memoria; o limite nao pode passar disso.")
+        raise HTTPException(400, f"A VM tem {maquina_mb} MB de memoria. O limite nao pode passar disso.")
     nucleos = os.cpu_count() or 1
     if cp and cp > nucleos:
-        raise HTTPException(400, f"A VM tem {nucleos} nucleo(s) de CPU; o limite nao pode passar disso.")
+        raise HTTPException(400, f"A VM tem {nucleos} nucleo(s) de CPU. O limite nao pode passar disso.")
     ger().armazenamento.salvar_recursos(sid, mem, cp)
     aviso = ger().aplicar_limites(sol)
     lim = ger().limites(sol)

@@ -225,8 +225,7 @@ def carregar_manifesto(caminho: Path) -> Solucao:
     for chave, valor in execucao.get("volumes", {}).items():
         if not isinstance(valor, str) or not valor.startswith("/"):
             raise ManifestoInvalido(
-                f"{caminho}: volume '{chave}' deve ser um caminho absoluto do container "
-                "(campos soltos depois de [execucao.volumes] entram nessa tabela; mova-os para o topo)"
+                f"{caminho}: volume '{chave}' deve ser um caminho absoluto do container (campos soltos depois de [execucao.volumes] entram nessa tabela. Mova-os para o topo)"
             )
     publicos = execucao.get("caminhos_publicos", [])
     if not isinstance(publicos, list) or not all(isinstance(c, str) and PUBLICO_RE.match(c) for c in publicos):
@@ -296,11 +295,9 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         for campo in ("url_interna", "chave_servico"):
             if supabase[campo] and VARS_PUBLICAS_BUILD.match(supabase[campo]):
                 raise ManifestoInvalido(
-                    f"{caminho}: [supabase] {campo} = {supabase[campo]}: variaveis com esse prefixo vao para o "
-                    "site e qualquer pessoa leria o valor; use um nome sem prefixo de frontend")
+                    f"{caminho}: [supabase] {campo} = {supabase[campo]}: variaveis com esse prefixo vao para o site e qualquer pessoa leria o valor, use um nome sem prefixo de frontend")
         if bool(build.get("variaveis_na_construcao", False)) and supabase["chave_servico"]:
-            raise ManifestoInvalido(f"{caminho}: [supabase] chave_servico nao pode ser usada num site estatico "
-                                    "(variaveis_na_construcao): ela iria para o navegador")
+            raise ManifestoInvalido(f"{caminho}: [supabase] chave_servico nao pode ser usada num site estatico (variaveis_na_construcao), ela ficaria visível para o navegador")
 
     configuracoes = []
     for item in dados.get("configuracoes", []):
@@ -404,8 +401,7 @@ def carregar_catalogo(pasta: Path, pasta_local: Path | None = None) -> tuple[dic
             continue  # recurso do servidor sem uso (ex.: Studio sem solucao com Supabase): nao aparece
         if sol.id in solucoes:
             if local:
-                erros.append(f"{caminho}: a solucao '{sol.id}' ja esta no repositorio do portal; "
-                             "a copia criada neste servidor foi ignorada (pode remove-la)")
+                erros.append(f"{caminho}: a solucao '{sol.id}' ja esta no repositorio do portal. A copia criada neste servidor foi ignorada e pode ser removida")
             else:
                 erros.append(f"{caminho}: id '{sol.id}' repetido")
             continue

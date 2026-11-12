@@ -282,7 +282,7 @@ except Exception as exc:  # o sistema sobe mesmo sem os estáticos
     if usa_url:
         an["banco"] = {"DATABASE_URL": "{db_url}"}
         an["configuracoes"].append({"nome": "DATABASE_URL", "rotulo": "Banco de dados (string de conexão)", "tipo": "segredo",
-                                    "ajuda": "Preenchido pelo portal com o banco do servidor. Para outro banco, troque aqui."})
+                                    "ajuda": "Preenchido automaticamente com o banco do servidor. Altere para trocar o banco."})
     if settings:
         if not an["segredos"]:
             avisos.append(Aviso("atencao", "SECRET_KEY fixa no settings.py",
@@ -326,8 +326,8 @@ def _analisar_flask_fastapi(repo: Repo, an: dict, fastapi: bool) -> None:
         alvo = f"{mod}:create_app()"
     else:
         arq, alvo = "", "app:app"
-        an["avisos"].append(Aviso("atencao", "Não achei onde a aplicação é criada",
-                                  "Usei 'app:app'. Ajuste o CMD do Dockerfile com o módulo e a variável certos.", []))
+        an["avisos"].append(Aviso("atencao", "Não foi possível identificar onde a aplicação é criada",
+                                  "Utilizado 'app:app'. Ajuste o CMD do Dockerfile com o módulo e a variável certos.", []))
     porta = 8000
     if fastapi:
         cmd = f'CMD ["uvicorn", "{alvo}", "--host", "0.0.0.0", "--port", "{porta}", "--proxy-headers", "--forwarded-allow-ips", "*"]'
@@ -345,7 +345,7 @@ def _analisar_flask_fastapi(repo: Repo, an: dict, fastapi: bool) -> None:
     if _usa_banco_url(codigo):
         an["banco"] = {"DATABASE_URL": "{db_url}"}
         an["configuracoes"].append({"nome": "DATABASE_URL", "rotulo": "Banco de dados (string de conexão)", "tipo": "segredo",
-                                    "ajuda": "Preenchido pelo portal com o banco do servidor. Para outro banco, troque aqui."})
+                                    "ajuda": "Preenchido automaticamente com o banco do servidor. Altere para trocar o banco."})
     if re.search(r"SECRET_KEY|secret_key", codigo) and re.search(r"(environ|getenv)\([\"']SECRET_KEY", codigo):
         an["segredos"] = ["SECRET_KEY"]
 
@@ -481,7 +481,7 @@ def _analisar_node(repo: Repo, an: dict) -> None:
     if re.search(r"process\.env\.DATABASE_URL", texto):
         an["banco"] = {"DATABASE_URL": "{db_url}"}
         an["configuracoes"].append({"nome": "DATABASE_URL", "rotulo": "Banco de dados (string de conexão)", "tipo": "segredo",
-                                    "ajuda": "Preenchido pelo portal com o banco do servidor. Para outro banco, troque aqui."})
+                                    "ajuda": "Preenchido automaticamente com o banco do servidor. Altere para trocar o banco."})
     if re.search(r"process\.env\.JWT_SECRET", texto):
         an["segredos"].append("JWT_SECRET")
     if re.search(r"process\.env\.SESSION_SECRET", texto):
@@ -574,7 +574,7 @@ def _analisar_dockerfile(repo: Repo, an: dict, caminho: str) -> None:
     porta = int(m.group(1)) if m else 8080
     if not m:
         an["avisos"].append(Aviso("atencao", "Dockerfile sem EXPOSE",
-                                  "Não consegui descobrir a porta da aplicação; confira o campo 'Porta da aplicação'.", [caminho]))
+                                  "Não foi possível identificar a porta da aplicação. Confira o campo 'Porta da aplicação'.", [caminho]))
     bloco = "\n".join(re.findall(r"^\s*HEALTHCHECK(?:[^\n]*\\\n)*[^\n]*", texto, re.M))
     h = (re.search(r"https?://[^/\s'\"]+(/[^\s'\")]*)", bloco)
          or re.search(r"[\"'](/[\w/.-]*(?:health|saude|status|ping)[\w/.-]*)[\"']", bloco))
@@ -627,7 +627,7 @@ def _avisos_gerais(repo: Repo) -> list[Aviso]:
                 break
     for nome, arqs in achados.items():
         avisos.append(Aviso("erro", f"{nome} no código",
-                            "Senha ou chave escrita no código. Troque-a (considere vazada) e leia de uma variável de ambiente.",
+                            "Senha ou chave escrita no código. Troque-a e leia de uma variável de ambiente.",
                             arqs[:5]))
 
     planilhas = [a for a in repo.arquivos if Path(a).suffix.lower() in {".xlsx", ".xls", ".xlsm", ".ods"}]
@@ -831,9 +831,9 @@ def _variaveis(repo: Repo, an: dict) -> None:
         ajuda = v.get("comentario") or ""
         ajuda = (ajuda + " " if ajuda else "") + f"Lida em {onde}."
         if v["obrigatoria"]:
-            ajuda += " O código não tem valor padrão: sem ela o sistema não sobe."
+            ajuda += " O código não tem valor padrão: sem ela o sistema não funciona."
         if construcao:
-            ajuda += " Entra no site na construção: depois de mudar, clique em Atualizar."
+            ajuda += " Entra no site na criação. Depois de mudar, clique em Atualizar na solução."
             if VAR_SEGREDO.search(nome):
                 expostas.append(nome)
         an["configuracoes"].append({"nome": nome, "rotulo": nome, "tipo": tipo, "padrao": padrao_txt, "ajuda": ajuda,
@@ -844,10 +844,7 @@ def _variaveis(repo: Repo, an: dict) -> None:
     if expostas:
         an["avisos"].append(Aviso(
             "atencao", "Chave secreta dentro do site",
-            "Estas variáveis são gravadas no site quando ele é construído: qualquer pessoa que abrir o sistema "
-            "consegue ler o valor pelo navegador (F12). Para chaves de API pagas (Gemini, OpenAI...), o certo é o "
-            "site chamar um servidor que guarda a chave. Se for usar assim mesmo, crie uma chave só para este "
-            "sistema, com limite de gastos.", expostas[:8]))
+            "Estas variáveis são gravadas no site quando ele é construído: qualquer pessoa que abrir o sistema consegue ler o valor pelo navegador. Para chaves de API pagas (Gemini, OpenAI...), o certo é o site chamar um servidor que guarda a chave. Se for usar assim mesmo, crie uma chave só para este sistema, com limite de gastos.", expostas[:8]))
 
 
 # ---------------------------------------------------------------- Supabase
@@ -900,14 +897,11 @@ def _supabase(repo: Repo, an: dict) -> None:
     texto = "\n".join(repo.ler(a) for a in repo.com_extensao(".js", ".ts", ".jsx", ".tsx", ".vue", ".mjs")[:600])
     an["avisos"].append(Aviso(
         "info", "Usa o Supabase: o portal cria um só para este sistema",
-        "Banco, login e arquivos ficam num Supabase próprio, no servidor, no mesmo endereço do sistema. "
-        f"O portal preenche {', '.join(sorted(gerenciadas)) or 'as variáveis do Supabase'} sozinho. O banco começa vazio: "
-        "traga as tabelas e os dados do Supabase de origem.", sorted(gerenciadas)))
+        f"Banco, login e arquivos ficam num Supabase próprio, no servidor, no mesmo endereço do sistema. O portal preenche {', '.join(sorted(gerenciadas)) or 'as variáveis do Supabase'} sozinho. O banco começa vazio: importe as tabelas e os dados do Supabase de origem.", sorted(gerenciadas)))
     if re.search(r"\.channel\(|\.subscribe\(\s*\)|postgres_changes", texto):
         an["avisos"].append(Aviso(
             "atencao", "Usa Realtime do Supabase",
-            "O Supabase do servidor não tem o serviço de tempo real: telas que atualizam sozinhas param de "
-            "atualizar (o resto funciona).", []))
+            "O Supabase do servidor não tem o serviço de atualizar em tempo real: telas que atualizam sozinhas param de atualizar.", []))
     if re.search(r"functions\.invoke\(", texto) or repo.existe("supabase/functions"):
         an["avisos"].append(Aviso(
             "atencao", "Usa Edge Functions do Supabase",
@@ -980,9 +974,8 @@ def analisar(pasta: Path, nome_repo: str = "") -> Analise:
     elif an["tecnologia"] in ("desconhecida", "python"):
         an["suportado"] = False
         an["avisos"].insert(0, Aviso(
-            "erro", "Não consegui preparar este projeto sozinho",
-            "Não encontrei um servidor web conhecido (Django, Flask, FastAPI, Streamlit, Node, PHP, .NET, Java ou HTML). "
-            "Scripts e rotinas sem tela não rodam como solução do portal. Peça um Dockerfile a quem desenvolveu.", []))
+            "erro", "Não foi possível configurar este projeto automaticamente",
+            "Não foi possível encontrar um servidor web conhecido (Django, Flask, FastAPI, Streamlit, Node, PHP, .NET, Java ou HTML). Scripts e rotinas sem tela não rodam como solução do portal. É necessário um Dockerfile.", []))
 
     if an["suportado"]:
         _variaveis(repo, an)

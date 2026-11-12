@@ -459,7 +459,7 @@ class Backups:
             for sol, chave in vols:
                 nome_vol = sol.nome_volume(chave)
                 if not docker_cli.volume_existe(nome_vol):
-                    registrar(f"  --  {nome_vol}: ainda nao existe (solucao nunca iniciada)")
+                    registrar(f"  -- {nome_vol}: ainda nao existe (solucao nunca foi iniciada)")
                     continue
                 tentar(f"volume {nome_vol}",
                        lambda s=sol, c=chave, v=nome_vol: self._backup_volume(parcial, item, s.id, c, v))
@@ -479,7 +479,7 @@ class Backups:
                     continue
                 chave = hashlib.sha256(url.encode()).hexdigest()
                 if chave in vistos:
-                    registrar(f"  --  {sol.id}: mesmo banco externo de {vistos[chave]} (ja copiado)")
+                    registrar(f"  -- {sol.id}: mesmo banco externo de {vistos[chave]} (ja importado)")
                     continue
                 vistos[chave] = sol.id
                 if not pg:
@@ -749,7 +749,7 @@ class Backups:
                      "em": datetime.now(fuso(self.cfg)).isoformat(timespec="seconds")}
         man["verificacao"] = resultado
         (pasta / "manifesto.json").write_text(json.dumps(man, indent=2, ensure_ascii=False), encoding="utf-8")
-        registrar("Verificacao: tudo certo." if not problemas else f"Verificacao: {len(problemas)} problema(s).")
+        registrar("Verificacao: sem erros." if not problemas else f"Verificacao: {len(problemas)} problema(s).")
         return resultado
 
     # ======================================================================== restauracao
@@ -829,13 +829,13 @@ class Backups:
             raise ErroBackup("Este portal nao tem o PostgreSQL do servidor configurado.")
         for it in dumps + vols:
             if _sha256(pasta / it["arquivo"]) != it["sha256"]:
-                raise ErroBackup(f"{it['arquivo']} esta corrompido (sha256 diferente); nada foi alterado.")
+                raise ErroBackup(f"{it['arquivo']} esta corrompido (sha256 diferente). Nada foi alterado.")
 
         if seguranca:
             registrar(f"Backup de seguranca de {sid} antes de restaurar")
             seg = self.fazer("antes-de-restaurar", lambda l: registrar("  " + l), somente=[sid])
             if not seg["ok"]:
-                raise ErroBackup("O backup de seguranca teve erros; nada foi restaurado. " + "; ".join(seg["erros"]))
+                raise ErroBackup("O backup de seguranca teve erros. Nada foi restaurado. " + "; ".join(seg["erros"]))
 
         estava_no_ar = False
         falha: Exception | None = None
@@ -869,8 +869,7 @@ class Backups:
         else:
             registrar("A solucao estava parada e continua parada.")
         if falha is not None:
-            raise ErroBackup(f"Restauracao interrompida: {falha}. O banco atual so e trocado quando a "
-                             f"restauracao inteira da certo; o backup de seguranca esta na lista.")
+            raise ErroBackup(f"Restauracao interrompida: {falha}. O banco atual so e trocado quando a restauracao inteira da certo. O backup de seguranca esta na lista.")
         self.auditoria("Restaurou backup", f"{sid} a partir de {nome}"
                        + (" (banco)" if dumps else "") + (" (arquivos)" if vols else ""))
 
@@ -882,7 +881,7 @@ class Backups:
             raise ErroBackup(f"O backup {nome} nao tem os dados do portal.")
         for it in itens.values():
             if _sha256(pasta / it["arquivo"]) != it["sha256"]:
-                raise ErroBackup(f"{it['arquivo']} esta corrompido; nada foi alterado.")
+                raise ErroBackup(f"{it['arquivo']} esta corrompido. Nada foi alterado.")
         dados = self.cfg.pasta_dados
         dados.mkdir(parents=True, exist_ok=True)
         if "dados.tar.gz" in itens:
@@ -1056,7 +1055,7 @@ class Backups:
                     f"Este .dump foi gerado por um PostgreSQL mais novo que o do servidor ({servidor}) e nao "
                     "pode ser lido. Gere de novo em SQL puro, que funciona entre versoes: "
                     "pg_dump -h localhost -U <usuario> -d <banco> --no-owner --no-privileges -f arquivo.sql") from exc
-            raise ErroBackup(f"Nao consegui ler o .dump (arquivo incompleto ou corrompido?): {msg[-300:]}") from exc
+            raise ErroBackup(f"Nao foi possível ler o .dump (arquivo incompleto ou corrompido?): {msg[-300:]}") from exc
         origem = re.search(r"Dumped from database version:\s*(\d+)", saida)
         ferramenta = re.search(r"Dumped by pg_dump version:\s*(\d+)", saida)
         banco = re.search(r";\s+dbname:\s*(\S+)", saida)
@@ -1117,17 +1116,16 @@ class Backups:
             raise ErroBackup("O arquivo nao esta em UTF-8 ou nao e texto. Envie o SQL do pg_dump, um .dump "
                              "(pg_dump -Fc) ou um .zip/.tar.gz com arquivos.") from exc
         except (OSError, EOFError) as exc:
-            raise ErroBackup(f"Nao consegui ler o arquivo: {exc}") from exc
+            raise ErroBackup(f"Nao foi possível ler o arquivo: {exc}") from exc
         texto = "".join(comeco)
         if "PostgreSQL database cluster dump" in texto:
             raise ErroBackup("Isto e um pg_dumpall (servidor inteiro). Use o pg_dump de um banco so.")
         if tabelas == 0:
-            raise ErroBackup("Nao achei nenhuma tabela (CREATE TABLE) no arquivo. Envie o resultado do pg_dump do banco.")
+            raise ErroBackup("Nao foi possível encontrar nenhuma tabela (CREATE TABLE) no arquivo. Envie o resultado do pg_dump do banco.")
         servidor = self.versao_servidor()
         avisos = []
         if ferramenta and servidor and ferramenta > servidor:
-            avisos.append(f"Gerado pelo pg_dump {ferramenta}; o servidor usa o PostgreSQL {servidor}. Normalmente "
-                          "funciona; se algum comando nao existir aqui, a importacao para e nada muda.")
+            avisos.append(f"Gerado pelo pg_dump {ferramenta}; o servidor usa o PostgreSQL {servidor}. Se algum comando nao existir, a importacao para e nada muda.")
         if removidas:
             avisos.append(f"{removidas} linha(s) de dono e permissoes da maquina de origem foram ignoradas: "
                           "no servidor, tudo fica do usuario da solucao.")
@@ -1218,11 +1216,10 @@ class Backups:
         arq = pasta / info["preparado"]
         if info["tipo"] == "banco":
             if not sol.banco or not pg:
-                raise ErroBackup(f"{sol.nome} nao usa o banco do servidor; nao ha onde importar.")
+                raise ErroBackup(f"{sol.nome} nao usa o banco do servidor. Não ha onde importar.")
             guardado = ger.armazenamento.banco(sid) or {}
             if not guardado.get("senha"):
-                raise ErroBackup(f"O banco de {sol.nome} ainda nao foi criado. Inicie a solucao uma vez (o portal "
-                                 "cria o banco) e importe depois.")
+                raise ErroBackup(f"O banco de {sol.nome} ainda nao foi criado. Inicie a solucao uma vez (o portal cria o banco automaticamente) e importe depois.")
             nome_banco, dono = guardado.get("nome") or banco_pg.nomes(sid)[0], banco_pg.nomes(sid)[1]
         else:
             if chave not in sol.volumes:
@@ -1233,7 +1230,7 @@ class Backups:
         registrar("Backup de seguranca antes de importar")
         seg = self.fazer("antes-de-importar", lambda l: registrar("  " + l), somente=[sid])
         if not seg["ok"]:
-            raise ErroBackup("O backup de seguranca teve erros; nada foi importado. " + "; ".join(seg["erros"]))
+            raise ErroBackup("O backup de seguranca teve erros. Nada foi importado. " + "; ".join(seg["erros"]))
 
         falha: Exception | None = None
         with Trava(self.pasta).segurar():

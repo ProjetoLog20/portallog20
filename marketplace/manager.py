@@ -312,7 +312,7 @@ class Gerenciador:
             # Com HEALTHCHECK na imagem, o proprio Docker diz se a aplicacao responde.
             if saude == "healthy" or (saude is None and self._responde(sol)):
                 if sol.supabase and not sb.gateway_no_ar(sol.id):
-                    return {"estado": "com_problema", "detalhe": "O Supabase do sistema esta fora do ar: clique em Reiniciar"}
+                    return {"estado": "com_problema", "detalhe": "O Supabase do sistema esta fora do ar. Clique em Reiniciar"}
                 return {"estado": "rodando", "detalhe": "No ar"}
             if saude is None:
                 return {"estado": "iniciando", "detalhe": "Aguardando resposta"}
@@ -362,8 +362,7 @@ class Gerenciador:
                 if not docker_cli.image_exists(sol.imagem):
                     self._build(sol, tarefa)
                 elif self._construcao_mudou(sol):
-                    tarefa.registrar("As variaveis da construcao mudaram (por exemplo, o endereco do servidor): "
-                                     "reconstruindo para o site usar os valores novos.")
+                    tarefa.registrar("As variaveis da construcao mudaram (por exemplo, o endereco do servidor). Reconstruindo para o site usar os valores novos.")
                     self._build(sol, tarefa)
                 self._iniciar(sol, tarefa)
             elif tarefa.acao == "reconstruir":
@@ -415,7 +414,7 @@ class Gerenciador:
             contexto = sol.contexto_build
         dockerfile = sol.dockerfile_portal or (contexto / sol.dockerfile_nome).resolve()
         if sol.dockerfile_portal:
-            tarefa.registrar("Usando o Dockerfile guardado pelo portal (o repositorio nao precisa ter um).")
+            tarefa.registrar("Usando o Dockerfile guardado pelo portal.")
         if not dockerfile.exists():
             raise docker_cli.DockerError(f"Dockerfile nao encontrado em {dockerfile}")
         tarefa.etapa = "Construindo imagem (a primeira vez leva alguns minutos)"
@@ -444,8 +443,7 @@ class Gerenciador:
     def _preparar_banco(self, sol: Solucao, tarefa: Tarefa) -> None:
         """Garante o banco da solucao no PostgreSQL do servidor ([banco] no manifesto)."""
         if not self.config.postgres_container:
-            tarefa.registrar("Banco: este portal nao tem PostgreSQL do servidor configurado; "
-                             "a solucao usa o banco das configuracoes (ou o local).")
+            tarefa.registrar("Banco: este portal nao tem PostgreSQL do servidor configurado. A solucao usa o banco das configuracoes (ou o local).")
             return
         guardado = self.armazenamento.banco(sol.id) or {}
         # Com outro banco nas configuracoes (ex.: Supabase), o do servidor nao e usado nem exigido.
@@ -459,7 +457,7 @@ class Gerenciador:
                     tarefa.registrar("Banco: ha campos do banco vazios. Para voltar ao banco do servidor, "
                                      "use 'Usar o banco do servidor' em Configuracoes e inicie de novo.")
                 else:
-                    tarefa.registrar("Banco: as configuracoes apontam para outro banco; o banco do servidor nao e usado.")
+                    tarefa.registrar("Banco: as configuracoes apontam para outro banco. O banco do servidor nao e usado.")
                 return
         elif self.armazenamento.banco_personalizado(sol, sol.banco):
             tarefa.registrar("Banco: as configuracoes ja apontam para outro banco e foram mantidas.")
@@ -555,7 +553,7 @@ class Gerenciador:
         try:
             docker_cli.atualizar_limites(sol.container, lim["memoria_mb"], lim["cpus"])
         except docker_cli.DockerError as exc:
-            return f"Nao deu para aplicar agora ({exc}); vale no proximo Reiniciar."
+            return f"Nao foi possível aplicar agora ({exc}); Será aplicado no proximo Reiniciar."
         return "Aplicado agora, sem reiniciar."
 
     def _diagnostico(self, sol: Solucao, tarefa: Tarefa, estado: dict) -> None:

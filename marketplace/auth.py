@@ -264,9 +264,9 @@ class Autenticacao:
             perde_admin = atual.admin and atual.ativo and (novo_perfil != "admin" or not novo_ativo)
             if perde_admin:
                 if autor is not None and autor.id == uid:
-                    raise ErroAuth("Voce nao pode remover o seu proprio acesso de administrador.")
+                    raise ErroAuth("Você não pode remover o seu próprio acesso de administrador.")
                 if self.total_admins_ativos(db) <= 1:
-                    raise ErroAuth("E preciso manter pelo menos um administrador ativo.")
+                    raise ErroAuth("É preciso manter pelo menos um administrador ativo.")
             novo_nome = atual.nome if nome is None else nome.strip()
             if not novo_nome:
                 raise ErroAuth("Informe o nome.")

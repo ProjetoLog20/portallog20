@@ -92,7 +92,7 @@ def garantir(container: str, sid: str, senha: str | None, registrar: Callable[[s
     senha_nova = senha is None
     senha = senha or nova_senha()
     if not re.fullmatch(r"[0-9a-f]{16,128}", senha):
-        raise ErroBanco("Senha guardada do banco em formato inesperado; apague-a do portal para gerar outra.")
+        raise ErroBanco("Senha guardada do banco em formato inesperado. Apague-a do portal para gerar outra.")
 
     existe_usuario = _psql(container, f"SELECT 1 FROM pg_roles WHERE rolname = '{usuario}'") == "1"
     if not existe_usuario:

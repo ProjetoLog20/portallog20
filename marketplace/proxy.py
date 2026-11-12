@@ -199,18 +199,18 @@ def aplicar(texto: str, pasta: Path, container: str) -> Resultado:
         )
         if not ok:
             novo.unlink(missing_ok=True)
-            return Resultado(False, f"Configuracao nova do Caddy invalida; a anterior continua em uso. {_resumo(saida)}",
+            return Resultado(False, f"Configuracao nova do Caddy invalida. A anterior continua em uso. {_resumo(saida)}",
                              erro=True)
 
     novo.replace(atual)
 
     if not caddy_no_ar:
-        return Resultado(True, "Configuracao do Caddy gravada; vale quando o Caddy iniciar.")
+        return Resultado(True, "Configuracao do Caddy salva. Será aplicada quando o Caddy iniciar.")
     ok, saida = docker_cli.executar_em(
         container, ["caddy", "reload", "--config", f"{PASTA_NO_CADDY}/{ARQUIVO}", "--adapter", "caddyfile"]
     )
     if not ok:
-        return Resultado(True, f"Configuracao gravada, mas o Caddy nao recarregou: {_resumo(saida)}", erro=True)
+        return Resultado(True, f"Configuracao salva, mas o Caddy nao recarregou: {_resumo(saida)}", erro=True)
     return Resultado(True, "Caddy atualizado com o catalogo atual.")
 
 

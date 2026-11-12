@@ -102,7 +102,7 @@ def analisar_repositorio(cfg: Config, solucoes: dict[str, Solucao], repositorio:
         if re.search(r"(?i)authentication|could not read username|403|not found|repository .* not found", texto):
             dica = (" Se o repositório for privado, ele precisa estar no token de leitura deste servidor "
                     "(PORTAL_GIT_TOKEN). Confira também o endereço e o branch.")
-        raise ErroAssistente(f"Não consegui baixar o repositório: {texto[-300:]}.{dica}") from exc
+        raise ErroAssistente(f"Não foi possível baixar o repositório: {texto[-300:]}.{dica}") from exc
     alvo = (pasta / subpasta).resolve() if subpasta else pasta
     if alvo != pasta.resolve() and pasta.resolve() not in alvo.parents or not alvo.is_dir():
         raise ErroAssistente(f"A subpasta '{subpasta}' não existe no repositório.")
@@ -204,7 +204,7 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao], editando: str | 
         raise ErroAssistente("Identificador: 2 a 41 caracteres, letras minúsculas, números e hífens (ex.: controle-frota).")
     if editando:
         if sid != editando:
-            raise ErroAssistente("O identificador não muda depois de criado.")
+            raise ErroAssistente("O identificador não pode ser alterado depois de criado.")
     elif sid in solucoes or (cfg.pasta_solucoes_locais / sid).exists():
         raise ErroAssistente(f"Já existe uma solução com o identificador '{sid}'.")
     nome = " ".join(str(d.get("nome", "")).split())
@@ -231,7 +231,7 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao], editando: str | 
             raise ErroAssistente(f"Nome de variável inválido: {k}")
     for k, v in volumes.items():
         if not VOLUME_RE.match(k) or not v.startswith("/"):
-            raise ErroAssistente(f"Volume '{k}': apelido em minúsculas e caminho absoluto no container (ex.: /app/data).")
+            raise ErroAssistente(f"Volume '{k}': nome em caracteres minúsculos e caminho absoluto no container (ex.: /app/data).")
     segredos = [s for s in (str(x).strip() for x in d.get("segredos") or []) if s]
     configuracoes, vistos = [], set()
     for c in d.get("configuracoes") or []:
@@ -262,7 +262,7 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao], editando: str | 
         for k in banco:
             if k not in nomes_conf:
                 configuracoes.append({"nome": k, "rotulo": f"Banco: {k}", "tipo": "segredo" if "SENHA" in k or "PASSWORD" in k
-                                      or k.endswith("URL") else "texto", "ajuda": "Preenchido pelo portal com o banco do servidor."})
+                                      or k.endswith("URL") else "texto", "ajuda": "Preenchido automaticamente com o banco do servidor."})
     supabase = None
     if not d.get("usar_supabase") and d.get("supabase"):
         # Sem o Supabase do servidor: o endereco e a chave voltam a ser configuracoes a preencher.
@@ -358,7 +358,7 @@ def editar(cfg: Config, solucoes: dict[str, Solucao], sid: str, dados: dict) -> 
     """Regrava uma solucao criada pelo assistente. O id nao muda; vale no proximo Reiniciar/Atualizar."""
     pasta = cfg.pasta_solucoes_locais / sid
     if not ID_RE.match(sid) or not (pasta / "solucao.toml").is_file():
-        raise ErroAssistente("Só dá para editar aqui as soluções criadas pelo assistente neste servidor.")
+        raise ErroAssistente("Único local de edição das soluções criadas pelo assistente neste servidor.")
     d = _limpar({**dados, "id": sid}, cfg, solucoes, editando=sid)
     toml = gerar_manifesto(d, com_dockerfile=bool(d["dockerfile"]))
     _validar_gerado(d, toml)
@@ -370,7 +370,7 @@ def para_edicao(cfg: Config, sol: Solucao) -> dict:
     """Os valores atuais da solucao no formato que a tela do assistente usa."""
     pasta = cfg.pasta_solucoes_locais / sol.id
     if not sol.local or not (pasta / "solucao.toml").is_file():
-        raise ErroAssistente("Só dá para editar aqui as soluções criadas pelo assistente neste servidor.")
+        raise ErroAssistente("Único local de edição das soluções criadas pelo assistente neste servidor.")
     bruto = tomllib.loads((pasta / "solucao.toml").read_text(encoding="utf-8"))
     df = pasta / "Dockerfile"
     auxiliares = {p.name: p.read_text(encoding="utf-8") for p in sorted(pasta.iterdir())
