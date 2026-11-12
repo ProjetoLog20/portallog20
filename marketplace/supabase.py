@@ -289,7 +289,9 @@ def especificacao(sid: str, seg: Segredos, url: str) -> list[Servico]:
                      "ENABLE_IMAGE_TRANSFORMATION": "false", "S3_PROTOCOL_ACCESS_KEY_ID": seg.s3_id,
                      "S3_PROTOCOL_ACCESS_KEY_SECRET": seg.s3_segredo},
                 volumes={volume(sid, "arquivos"): "/var/lib/storage"},
-                saude="wget --no-verbose --tries=1 --spider http://localhost:5000/status"),
+                # 127.0.0.1, nao localhost: na imagem (Alpine) localhost vai primeiro para o IPv6 (::1),
+                # onde o servico nao escuta, e o teste falhava com o servico funcionando.
+                saude="wget --no-verbose --tries=1 --spider http://127.0.0.1:5000/status"),
         # Gateway (Envoy, o padrao do compose oficial): confere as chaves e junta login, dados e
         # arquivos num endereco so. Na rede do portal, o Caddy chega nele pelo nome do container.
         Servico("gw", c("gw"), IMAGENS["gw"], apelidos=["kong", "envoy"], na_rede_portal=True,
@@ -437,6 +439,7 @@ def garantir(sid: str, url: str, pasta_dados: Path, rede_portal: str,
             if s.nome == "db":
                 _esperar(s.container, "banco do Supabase", 300, registrar)
         _esperar(container(sid, "gw"), "gateway do Supabase", 180, registrar)
+        _esperar(container(sid, "storage"), "servico de arquivos do Supabase", 120, registrar)
         for s in ("auth", "storage"):
             e = _estado(container(sid, s))
             if e.get("reiniciando") or (e["existe"] and not e["rodando"]):
