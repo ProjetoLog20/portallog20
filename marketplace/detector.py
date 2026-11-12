@@ -870,7 +870,6 @@ def _supabase(repo: Repo, an: dict) -> None:
     nomes = [c["nome"] for c in an["configuracoes"]]
     publica = lambda n: bool(VARS_BUILD.match(n))  # noqa: E731
     escolher = lambda r: next((n for n in sorted(nomes, key=lambda n: not publica(n)) if r.search(n)), "")  # noqa: E731
-    site = an["tecnologia"] in ("spa", "nextjs")
     url = escolher(RE_SB_URL) or ("VITE_SUPABASE_URL" if an["tecnologia"] == "spa" else "")
     chave = escolher(RE_SB_CHAVE) or ("VITE_SUPABASE_ANON_KEY" if an["tecnologia"] == "spa" else "")
     servico = next((n for n in nomes if RE_SB_SERVICO.search(n)), "")
@@ -881,8 +880,14 @@ def _supabase(repo: Repo, an: dict) -> None:
             "que abrir o sistema. O portal não preenche essa variável; o site deve usar só a chave pública (anon).",
             [servico]))
         servico = ""
-    if site and servico:
+    if an["tecnologia"] == "spa" and servico:
         servico = ""  # site estatico: nada roda no servidor que possa guardar a chave
+    if an["tecnologia"] in ("nextjs", "node"):
+        an["avisos"].append(Aviso(
+            "atencao", "Chamadas ao Supabase pelo servidor",
+            "O endereço do Supabase passa pelo login do portal: funciona no navegador de quem entrou. Se o "
+            "servidor do sistema também chama o Supabase, ele precisa do endereço interno: em [supabase] do "
+            "manifesto, aponte url_interna para a variável que o servidor usa.", []))
     an["supabase"] = {"url": url, "chave_anon": chave, "url_interna": "", "chave_servico": servico}
     gerenciadas = {n for n in an["supabase"].values() if n}
     an["configuracoes"] = [c for c in an["configuracoes"] if c["nome"] not in gerenciadas]

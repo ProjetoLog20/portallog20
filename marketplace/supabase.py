@@ -366,7 +366,7 @@ def _criar(s: Servico, sid: str, rede_privada: str, rede_portal: str) -> None:
     if s.entrypoint:
         args += ["--entrypoint", s.entrypoint]
     args += [s.imagem, *s.comando]
-    r = docker_cli._run(args, timeout=900, env=s.env)  # baixa a imagem na primeira vez
+    r = docker_cli._run(args, timeout=1800, env=s.env)  # baixa a imagem na primeira vez
     docker_cli._check(r, f"Falha ao criar {s.container}")
     for origem, destino in s.arquivos.items():
         docker_cli.rodar(["cp", str(ARQUIVOS / origem), f"{s.container}:{destino}"], timeout=60)
@@ -412,6 +412,13 @@ def garantir(sid: str, url: str, pasta_dados: Path, rede_portal: str,
     """
     with _trava(sid):
         seg = segredos(pasta_dados, sid)
+        if not _estado(container(sid, "db"))["existe"]:
+            import shutil
+
+            livre_gb = shutil.disk_usage("/").free / 1024 ** 3
+            if livre_gb < 5:
+                registrar(f"ATENCAO: so {livre_gb:.1f} GB livres no disco. As imagens do Supabase ocupam cerca de "
+                          "3 GB e o banco cresce com os dados; se faltar espaco, a criacao falha no meio.")
         _garantir_rede(rede(sid), sid)
         mudou_algo = False
         for s in especificacao(sid, seg, url):

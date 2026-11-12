@@ -51,6 +51,7 @@ ERROS_ESPERADOS = (
     "permission denied to change default privileges",
     "must be owner of extension",
     "must be owner of schema public",
+    'publication "supabase_realtime" does not exist',
 )
 
 
@@ -91,6 +92,8 @@ def validar(dados: dict) -> tuple[Origem, dict[str, bool]]:
     if not dados.get("senha"):
         raise ErroCopia("Informe a senha do banco de origem.")
     partes = {k: bool((dados.get("partes") or {}).get(k)) for k in ("tabelas", "usuarios", "storage", "arquivos")}
+    if partes["arquivos"]:
+        partes["storage"] = True  # os arquivos so entram num bucket que existe
     if not any(partes.values()):
         raise ErroCopia("Marque ao menos uma parte para copiar.")
     if partes["arquivos"]:
@@ -226,31 +229,66 @@ def _colunas(banco: _Banco, esquema: str, tabela: str, lado: str) -> list[str]:
     return [l[0] for l in linhas if l]
 
 
-def _copiar_tabela(banco: _Banco, esquema: str, tabela: str, conflito: str = "") -> int:
-    """Copia as linhas de esquema.tabela da origem para o local, so com as colunas que os dois
-    lados tem. `conflito`: coluna da chave para atualizar a linha que ja existe (upsert)."""
+def _exportar(banco: _Banco, esquema: str, tabela: str) -> tuple[str, str]:
+    """Le da origem as linhas de esquema.tabela, so com as colunas que os dois lados tem (versoes
+    diferentes do login tem colunas diferentes). Devolve (lista de colunas, arquivo csv)."""
     origem = _colunas(banco, esquema, tabela, "origem")
     local = set(_colunas(banco, esquema, tabela, "local"))
     cols = [c for c in origem if c in local]
     if not cols:
-        return 0
+        raise ErroCopia(f"{esquema}.{tabela}: nenhuma coluna em comum entre a origem e o Supabase local.")
     lista = ", ".join(f'"{c}"' for c in cols)
     arq = f"{ARQ}/{esquema}.{tabela}.csv"
     banco.origem_cmd(["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-c",
                       f"\\copy (select {lista} from {esquema}.{tabela}) to '{arq}' csv"])
-    if conflito:
-        atualizar = ", ".join(f'"{c}" = excluded."{c}"' for c in cols if c != conflito)
-        sql = (f"create temp table _t (like {esquema}.{tabela});\n"
-               f"\\copy _t ({lista}) from '{arq}' csv\n"
-               f"insert into {esquema}.{tabela} ({lista}) select {lista} from _t "
-               f'on conflict ("{conflito}") do update set {atualizar};\n')
-        banco.local_sql(sql)
-    else:
-        # Sem disparar gatilhos (ex.: um gatilho do sistema que cria o perfil de cada usuario novo):
-        # as linhas que eles criariam ja vem da origem.
-        banco.local_sql(f"set session_replication_role = replica;\n\\copy {esquema}.{tabela} ({lista}) from '{arq}' csv\n")
-    linhas = banco.local_csv(f"select count(*) from {esquema}.{tabela}")
+    return lista, arq
+
+
+def _contar(banco: _Banco, tabela: str) -> int:
+    linhas = banco.local_csv(f"select count(*) from {tabela}")
     return int(linhas[0][0]) if linhas else 0
+
+
+def _copiar_usuarios(banco: _Banco) -> tuple[int, int]:
+    """Troca os usuarios do login locais pelos da origem, numa transacao so: primeiro le tudo da
+    origem; se a leitura falhar, nada local e apagado. Sem disparar gatilhos (ex.: um gatilho do
+    sistema que cria o perfil de cada usuario novo): as linhas que eles criariam ja vem da origem."""
+    lu, au = _exportar(banco, "auth", "users")
+    li, ai = _exportar(banco, "auth", "identities")
+    # Apaga os usuarios e o que depende deles DENTRO do esquema auth (identidades, sessoes...), sem
+    # o "on delete cascade" chegar as tabelas do sistema: quem copia so os usuarios nao pode perder,
+    # por exemplo, os perfis ligados a eles.
+    apagar = " ".join(l[0] for l in banco.local_csv(SQL_DEPENDENTES_AUTH) if l)
+    banco.local_sql("set local session_replication_role = replica;\n"
+                    f"{apagar}\n"
+                    f"\\copy auth.users ({lu}) from '{au}' csv\n"
+                    f"\\copy auth.identities ({li}) from '{ai}' csv\n")
+    return _contar(banco, "auth.users"), _contar(banco, "auth.identities")
+
+
+# Tabelas do esquema auth ligadas (direta ou indiretamente) a auth.users.
+SQL_DEPENDENTES_AUTH = r"""
+with recursive dep(rel) as (
+  select 'auth.users'::regclass
+  union
+  select c.conrelid::regclass from pg_constraint c join dep on c.confrelid = dep.rel
+    join pg_class k on k.oid = c.conrelid join pg_namespace n on n.oid = k.relnamespace
+   where c.contype = 'f' and n.nspname = 'auth'
+)
+select format('delete from %s;', rel) from dep
+"""
+
+
+def _copiar_buckets(banco: _Banco) -> int:
+    """Buckets da origem: cria os que faltam e atualiza os que ja existem (pelo id)."""
+    lista, arq = _exportar(banco, "storage", "buckets")
+    cols = [c.strip('"') for c in lista.split(", ")]
+    atualizar = ", ".join(f'"{c}" = excluded."{c}"' for c in cols if c != "id")
+    acao = f"do update set {atualizar}" if atualizar else "do nothing"
+    banco.local_sql(f"create temp table _t (like storage.buckets) on commit drop;\n"
+                    f"\\copy _t ({lista}) from '{arq}' csv\n"
+                    f"insert into storage.buckets ({lista}) select {lista} from _t on conflict (\"id\") {acao};\n")
+    return _contar(banco, "storage.buckets")
 
 
 # SQL que recria o esquema public com o mesmo dono, as mesmas permissoes e as mesmas permissoes
@@ -282,6 +320,12 @@ select format('drop policy if exists %I on storage.%I; create policy %I on stora
                                     from unnest(roles) r), ', '),
               coalesce(' using (' || qual || ')', ''), coalesce(' with check (' || with_check || ')', ''))
   from pg_policies where schemaname = 'storage' and tablename in ('objects', 'buckets')
+"""
+
+
+# Extensoes ligadas na origem (ex.: pg_trgm, unaccent), para ligar no local antes das tabelas.
+SQL_EXTENSOES = r"""
+select e.extname, n.nspname from pg_extension e join pg_namespace n on n.oid = e.extnamespace order by 1
 """
 
 
@@ -340,12 +384,11 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
             recriar = "\n".join(l[1] for l in banco.local_csv(SQL_RECRIAR_PUBLIC) if len(l) > 1)
             banco.local_sql(recriar)
             c.registrar("Esquema public local recriado vazio, com as mesmas permissões.")
+            _ligar_extensoes(c, banco)
 
         if partes["usuarios"]:
             c.etapa = "Copiando os usuários do login"
-            banco.local_sql("delete from auth.users;")
-            n1 = _copiar_tabela(banco, "auth", "users")
-            n2 = _copiar_tabela(banco, "auth", "identities")
+            n1, n2 = _copiar_usuarios(banco)
             c.registrar(f"Usuários do login: {n1} usuário(s), {n2} identidade(s), com as mesmas senhas.")
             c.resumo["usuarios"] = n1
 
@@ -355,7 +398,9 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
             r = docker_cli._run(["exec", *[a for n in env for a in ("-e", n)], banco.container, "pg_restore",
                                  "--no-owner", "--role=postgres", "-d", "postgres", f"{ARQ}/public.dump"],
                                 timeout=3600, env=env)
-            erros = [l.split("ERROR:", 1)[-1].strip() for l in (r.stderr or "").splitlines() if "ERROR:" in l]
+            erros = [l.split("ERROR:", 1)[-1].replace("pg_restore: error:", "").strip()
+                     for l in (r.stderr or "").splitlines()
+                     if re.search(r"(?i)error", l) and "errors ignored on restore" not in l and "Command was:" not in l]
             inesperados = [e for e in erros if not any(x in e for x in ERROS_ESPERADOS)]
             if erros:
                 c.registrar(f"pg_restore: {len(erros) - len(inesperados)} aviso(s) esperado(s) "
@@ -377,16 +422,21 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
                 c.avisos.append(f"Vieram {n_local} de {n_tab} tabelas. Veja o log do pg_restore.")
 
         if partes["storage"]:
-            c.etapa = "Copiando os buckets e as regras dos arquivos"
-            n_b = _copiar_tabela(banco, "storage", "buckets", conflito="id")
+            c.etapa = "Copiando os buckets dos arquivos"
+            n_b = _copiar_buckets(banco)
+            c.registrar(f"Arquivos: {n_b} bucket(s).")
+            c.resumo["buckets"] = n_b
+        # As regras dos arquivos costumam usar funcoes do public: recriar o public (tabelas) as apaga
+        # junto. Por isso voltam sempre que as tabelas ou os buckets vem da origem.
+        if partes["storage"] or partes["tabelas"]:
+            c.etapa = "Copiando as regras de acesso aos arquivos"
             regras = [l[0] for l in banco.origem_csv(SQL_REGRAS_STORAGE) if l]
             if regras:
                 try:
                     banco.local_sql("\n".join(regras))
                 except ErroCopia as exc:
                     c.avisos.append(f"Regras dos arquivos: {exc}")
-            c.registrar(f"Arquivos: {n_b} bucket(s) e {len(regras)} regra(s) de acesso.")
-            c.resumo["buckets"] = n_b
+            c.registrar(f"Arquivos: {len(regras)} regra(s) de acesso.")
 
         banco.local_sql("notify pgrst, 'reload schema';", transacao=False)
 
@@ -413,6 +463,24 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
     finally:
         c.etapa = ""
         c.fim = time.time()
+
+
+def _ligar_extensoes(c: Copia, banco: _Banco) -> None:
+    """Liga no local as extensoes que a origem usa e que o local tem (sem elas, tabelas e funcoes
+    que dependem delas nao sao criadas)."""
+    origem = {(l[0], l[1]) for l in banco.origem_csv(SQL_EXTENSOES) if len(l) > 1}
+    local = {l[0] for l in banco.local_csv(SQL_EXTENSOES) if l}
+    disponiveis = {l[0] for l in banco.local_csv("select name from pg_available_extensions") if l}
+    faltam = sorted((n, e) for n, e in origem if n not in local)
+    for nome, esquema in faltam:
+        if nome not in disponiveis:
+            c.avisos.append(f"Extensão {nome}: existe na origem, mas não neste Supabase; o que depende dela não vem.")
+            continue
+        try:
+            banco.local_sql(f'create schema if not exists "{esquema}";\ncreate extension if not exists "{nome}" with schema "{esquema}";')
+            c.registrar(f"Extensão {nome} ligada (esquema {esquema}).")
+        except ErroCopia as exc:
+            c.avisos.append(f"Extensão {nome}: {exc}")
 
 
 def _copiar_arquivos(c: Copia, banco: _Banco, origem: Origem, seg) -> None:

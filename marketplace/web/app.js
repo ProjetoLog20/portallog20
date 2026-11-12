@@ -720,7 +720,10 @@ async function dialogoCopiarSupabase(sol) {
       marca("arquivos", "Arquivos", "Baixa cada arquivo da origem e envia para cá. Precisa da chave de serviço da origem.", false)),
     blocoArquivos,
     campo("cp-confirma", `Para confirmar, digite ${sol.id}`, { type: "text", required: true }));
-  form.querySelector("[name=arquivos]").addEventListener("change", (ev) => { blocoArquivos.hidden = !ev.target.checked; });
+  form.querySelector("[name=arquivos]").addEventListener("change", (ev) => {
+    blocoArquivos.hidden = !ev.target.checked;
+    if (ev.target.checked) form.querySelector("[name=storage]").checked = true;  // arquivo só entra num bucket que existe
+  });
   const botao = h("button", { type: "submit", class: "botao perigo-cheio", form: "form-copiar" }, "Copiar e substituir");
   corpo.replaceChildren(form);
   rodape.replaceChildren(h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), botao);
