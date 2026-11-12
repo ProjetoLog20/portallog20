@@ -177,8 +177,8 @@ code { font-family: var(--mono); font-size: .93em; }
 }
 
 /* ===================== estrutura ===================== */
-/* Conteúdo alinhado à esquerda, na mesma linha da logo (centralizado parecia tela vazia). */
-.conteudo { max-width: 1320px; margin: 0; padding: 34px clamp(16px, 4vw, 40px) 96px; }
+/* Conteúdo alinhado à esquerda e na largura toda da tela, na mesma linha da logo. */
+.conteudo { max-width: none; margin: 0; padding: 34px clamp(16px, 4vw, 40px) 96px; }
 .conteudo.conteudo-cheio { max-width: none; padding: 0; }
 
 .intro { margin-bottom: 24px; }
@@ -935,7 +935,9 @@ a.tile:hover { box-shadow: var(--sombra-2); transform: translateY(-2px); }
 .filtro { transition: background-color var(--transicao), border-color var(--transicao), color var(--transicao); }
 
 /* Tabelas: cabeçalho em versalete pequeno, como em relatórios. */
-th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+/* So os titulos das colunas: cabecalhos de linha (nomes de pessoas e sistemas) e a matriz de
+   acessos ficam como estao. */
+table:not(.matriz) thead th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
 .tabela thead th { padding-top: 11px; padding-bottom: 11px; border-bottom-color: var(--linha-forte); }
 .tabela tbody tr td { transition: background-color var(--transicao); }
 
