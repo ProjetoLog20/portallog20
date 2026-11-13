@@ -392,6 +392,17 @@ liga/desliga, um ou mais horários, quanto guardar (dias, semanas, meses e manua
 segunda cópia e um webhook (Teams/Power Automate) avisado quando um backup falha. No manifesto,
 `[backup] incluir = false` tira uma solução do backup.
 
+**Backup de uma solução só:** botão **Backup de uma solução** (ou
+`python -m marketplace backup <id>`). Guarda só o que é dela (banco, pastas de dados, banco
+externo e Supabase), sem o portal nem as outras soluções, e aparece na lista como "Só de uma
+solução". A limpeza automática guarda os mais recentes de **cada** solução (o número de
+manuais), sem que os backups de uma empurrem os das outras ou os completos para fora. Em
+**Mostrar**, a lista filtra os backups com dados de uma solução (os completos e os só dela).
+
+**Apagar de uma vez:** **Apagar todos** (com "Todas as soluções") apaga todos os backups da
+pasta; com uma solução escolhida em **Mostrar**, só os backups feitos só dela (os completos
+ficam). Os fixados sempre ficam, a segunda cópia não é tocada e é preciso digitar APAGAR.
+
 **Onde fica:** `backups/` na pasta do portal (fora do Git). `PORTAL_BACKUP_PASTA_HOST` no `.env`
 muda para outro disco e `PORTAL_BACKUP_COPIA_HOST` grava uma segunda cópia (ex.: pasta da rede
 montada na VM pelo `/etc/fstab`). **Sem cópia fora da VM, perder a VM é perder os backups.**

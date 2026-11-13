@@ -133,7 +133,11 @@ def cmd_backup(args: argparse.Namespace) -> int:
     from .backup import ErroBackup
 
     try:
-        man = _backups().fazer(args.motivo, print, somente=args.solucoes or None)
+        servico = _backups()
+        if args.solucoes and len(args.solucoes) == 1 and args.motivo == "manual":
+            man = servico.fazer_solucao(args.solucoes[0], print)  # backup isolado da solucao
+        else:
+            man = servico.fazer(args.motivo, print, somente=args.solucoes or None)
     except ErroBackup as exc:
         print(f"ERRO: {exc}", file=sys.stderr)
         return 1
@@ -303,7 +307,7 @@ def main() -> None:
     p_sinc.add_argument("solucoes", nargs="*", help="Ids das solucoes (padrao: todas)")
     p_bkp = sub.add_parser("backup", help="Faz um backup agora (bancos, volumes e dados do portal)")
     p_bkp.add_argument("--motivo", default="manual", choices=["manual", "antes-de-atualizar", "agendado"])
-    p_bkp.add_argument("solucoes", nargs="*", help="So estas solucoes (padrao: tudo, inclusive o portal)")
+    p_bkp.add_argument("solucoes", nargs="*", help="So estas solucoes (padrao: tudo, inclusive o portal); uma so = backup isolado dela")
     sub.add_parser("backups", help="Lista os backups")
     p_ver = sub.add_parser("verificar-backup", help="Confere um backup com uma restauracao de teste")
     p_ver.add_argument("nome")

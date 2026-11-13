@@ -849,13 +849,52 @@ def api_backups_ajustes(ajustes: dict | None = Body(None, embed=True), autor: Us
 
 
 @app.post("/api/backups")
-def api_backup_agora(autor: Usuario = Depends(exigir_admin)) -> dict:
+def api_backup_agora(solucao: str = Body("", embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
+    """Sem `solucao`: backup completo. Com `solucao`: backup isolado so dela."""
+    if solucao:
+        sol = _solucao(solucao)
+        if not sol.backup_incluir or solucao in BACKUPS.ajustes().excluir:
+            raise HTTPException(409, f"{sol.nome} esta fora do backup (manifesto ou Ajustes).")
+
+        def rodar(tarefa) -> None:
+            tarefa.etapa = f"Backup de {sol.nome}"
+            man = BACKUPS.fazer_solucao(solucao, tarefa.registrar)
+            if not man["ok"]:
+                tarefa.erro = f"{len(man['erros'])} item(ns) com erro: " + "; ".join(man["erros"])[:500]
+
+        try:
+            BACKUPS.em_segundo_plano(f"backup de {sol.nome}", rodar)
+        except ErroBackup as exc:
+            raise HTTPException(409, str(exc)) from exc
+        AUTH.registrar(autor, "Fez backup de uma solucao", solucao)
+        return {"ok": True}
     try:
         BACKUPS.em_segundo_plano("backup manual", lambda tarefa: BACKUPS._rodar_backup(tarefa, "manual"))
     except ErroBackup as exc:
         raise HTTPException(409, str(exc)) from exc
     AUTH.registrar(autor, "Fez backup manual")
     return {"ok": True}
+
+
+@app.post("/api/backups/apagar")
+def api_backups_apagar_todos(confirmacao: str = Body("", embed=True), solucao: str = Body("", embed=True),
+                             autor: Usuario = Depends(exigir_admin)) -> dict:
+    """Apaga de uma vez todos os backups (ou so os isolados de uma solucao), menos os fixados."""
+    if confirmacao.strip().upper() != "APAGAR":
+        raise HTTPException(400, "Digite APAGAR para confirmar.")
+    if solucao:
+        _solucao(solucao)
+    t = BACKUPS.tarefa
+    if t and t.estado == "executando":
+        raise HTTPException(409, f"Ja ha uma operacao em andamento: {t.acao}")
+    try:
+        r = BACKUPS.apagar_todos(solucao or None)
+    except (ErroBackup, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    AUTH.registrar(autor, "Apagou backups de uma vez",
+                   f"{len(r['apagados'])} backup(s)" + (f" isolados de {solucao}" if solucao else "")
+                   + (f"; {r['fixados']} fixado(s) mantido(s)" if r["fixados"] else ""))
+    return {"ok": True, "apagados": len(r["apagados"]), "fixados": r["fixados"]}
 
 
 @app.post("/api/backups/{nome}/verificar")

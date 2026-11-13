@@ -52,7 +52,7 @@ except ImportError:  # pragma: no cover
     fcntl = None
 
 VERSAO_FORMATO = 1
-MOTIVOS = {"agendado", "manual", "antes-de-atualizar", "antes-de-restaurar", "antes-de-importar"}
+MOTIVOS = {"agendado", "manual", "solucao", "antes-de-atualizar", "antes-de-restaurar", "antes-de-importar"}
 NOME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d{6}_[a-z-]+$")
 HORARIO_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 SUFIXOS_TEMPORARIOS = ("_restaurando", "_verificacao")
@@ -398,6 +398,9 @@ class Backups:
             raise ErroBackup(msg)
 
         nome = f"{agora:%Y-%m-%d_%H%M%S}_{motivo}"
+        while (self.pasta / nome).exists():  # dois backups no mesmo segundo (ex.: solucoes pequenas)
+            agora += timedelta(seconds=1)
+            nome = f"{agora:%Y-%m-%d_%H%M%S}_{motivo}"
         destino = self.pasta / nome
         parcial = self.pasta / f".{nome}.parcial"
         if parcial.exists():
@@ -725,10 +728,16 @@ class Backups:
                     break
                 vistos.append(k)
                 ficar.add(m["nome"])
-        # Manuais/antes de atualizar (completos) e os de seguranca (parciais, so uma solucao)
-        # contam separado: varios testes de restauracao nao empurram os completos para fora.
+        # Manuais/antes de atualizar (completos) e os parciais (so uma solucao: o "so desta solucao"
+        # e os de seguranca) contam separado, e os parciais por solucao: varios backups de uma
+        # solucao nao empurram para fora os completos nem os das outras solucoes.
         ficar.update(m["nome"] for m in [a for a in avulsos if not a.get("parcial")][:aj.manter_avulsos])
-        ficar.update(m["nome"] for m in [a for a in avulsos if a.get("parcial")][:aj.manter_avulsos])
+        grupos: dict[tuple, list[dict]] = {}
+        for a in avulsos:
+            if a.get("parcial"):
+                grupos.setdefault(tuple(sorted(a.get("solucoes") or [])), []).append(a)
+        for lista_grupo in grupos.values():
+            ficar.update(m["nome"] for m in lista_grupo[:aj.manter_avulsos])
         ficar.update(m["nome"] for m in lista if m.get("fixado"))
         completos_ok = [m for m in lista if m.get("ok") and not m.get("parcial")]
         if completos_ok:  # nunca apaga o ultimo backup completo bom
@@ -756,6 +765,43 @@ class Backups:
         man.pop("nome", None)
         man["nome"] = nome
         (pasta / "manifesto.json").write_text(json.dumps(man, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    @staticmethod
+    def so_da_solucao(man: dict, sid: str) -> bool:
+        """Backup isolado desta solucao (parcial, so com ela)."""
+        return bool(man.get("parcial")) and list(man.get("solucoes") or []) == [sid]
+
+    def fazer_solucao(self, sid: str, registrar: Callable[[str], None] = print) -> dict:
+        """Backup so desta solucao: banco, pastas de dados, banco externo e Supabase dela."""
+        sol = self._ger().solucoes.get(sid)
+        if sol is None:
+            raise ErroBackup(f"Solucao desconhecida: {sid}")
+        if not sol.backup_incluir or sid in self.ajustes().excluir:
+            raise ErroBackup(f"{sol.nome} esta fora do backup (manifesto ou Ajustes).")
+        man = self.fazer("solucao", registrar, somente=[sid])
+        if not man["itens"] and not man["erros"]:
+            # Nada para guardar (ex.: nunca foi iniciada): nao deixa um backup vazio na lista.
+            with Trava(self.pasta).segurar():
+                shutil.rmtree(self.pasta / man["nome"], ignore_errors=True)
+            raise ErroBackup(f"{sol.nome} ainda nao tem dados para guardar (banco, pastas ou Supabase).")
+        return man
+
+    def apagar_todos(self, solucao: str | None = None) -> dict:
+        """Apaga de uma vez os backups desta pasta, menos os fixados. Com `solucao`: so os
+        backups isolados dela (os completos tem todas as solucoes e ficam). A segunda copia
+        (pasta de rede) nao e tocada."""
+        apagados: list[str] = []
+        fixados = 0
+        with Trava(self.pasta).segurar():
+            for m in self.listar():
+                if solucao and not self.so_da_solucao(m, solucao):
+                    continue
+                if m.get("fixado"):
+                    fixados += 1
+                    continue
+                shutil.rmtree(self.pasta / m["nome"])
+                apagados.append(m["nome"])
+        return {"apagados": apagados, "fixados": fixados}
 
     def remover(self, nome: str) -> None:
         pasta, man = self.obter(nome)
@@ -1470,6 +1516,7 @@ def resumo(man: dict) -> dict:
         "nome": man["nome"], "motivo": man.get("motivo"), "criado_em": man.get("criado_em"),
         "ok": man.get("ok"), "erros": man.get("erros", []), "bytes": man.get("bytes", 0),
         "duracao_s": man.get("duracao_s"), "parcial": man.get("parcial", False), "fixado": man.get("fixado", False),
+        "solucoes": man.get("solucoes", []),
         "verificacao": man.get("verificacao"),
         "itens": [{k: v for k, v in i.items() if k != "sha256"} for i in man.get("itens", [])],
     }

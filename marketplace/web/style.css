@@ -958,3 +958,12 @@ table:not(.matriz) thead th { font-size: 11.5px; text-transform: uppercase; lett
 @media (prefers-reduced-motion: reduce) {
   a.tile:hover, .botao:active { transform: none; }
 }
+
+/* backups: filtro por solução e "apagar todos" */
+.barra-backups .espaco { flex: 1; }
+.filtro-rotulo { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--suave); }
+.filtro-select {
+  min-height: 38px; padding: 0 10px; border: 1px solid var(--linha-forte); border-radius: var(--raio-p);
+  background: var(--superficie); color: var(--texto); font: inherit; font-size: 14px;
+}
+.filtro-select:focus { outline: none; border-color: var(--cobre); box-shadow: 0 0 0 3px rgba(201, 122, 45, .2); }

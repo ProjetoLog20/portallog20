@@ -1884,9 +1884,9 @@ function pintarCriada(alvo, r, dados) {
 
 /* ================= admin: backups ================= */
 
-const estadoBackups = { aba: "lista", dados: null, logAberto: false };
+const estadoBackups = { aba: "lista", dados: null, logAberto: false, filtro: "" };
 const MOTIVOS_BACKUP = {
-  agendado: "Automático", manual: "Manual", "antes-de-atualizar": "Antes de atualizar o portal",
+  agendado: "Automático", manual: "Manual", solucao: "Só de uma solução", "antes-de-atualizar": "Antes de atualizar o portal",
   "antes-de-restaurar": "Segurança, antes de restaurar",
   "antes-de-importar": "Segurança, antes de importar",
 };
@@ -1922,7 +1922,9 @@ async function telaBackups() {
     h("section", { class: "intro intro-linha" },
       h("div", {}, h("h1", {}, "Backups"),
         h("p", {}, "Cópias dos bancos das soluções, das pastas de dados e dos dados do portal.")),
-      h("div", { class: "intro-lado" }, h("button", { type: "button", class: "botao primario", id: "backup-agora", onclick: fazerBackupAgora }, "Fazer backup agora"))),
+      h("div", { class: "intro-lado" },
+        h("button", { type: "button", class: "botao", id: "backup-solucao", onclick: dialogoBackupSolucao }, "Backup de uma solução"),
+        h("button", { type: "button", class: "botao primario", id: "backup-agora", onclick: fazerBackupAgora }, "Fazer backup agora"))),
     h("div", { id: "backup-alerta" }),
     h("div", { class: "grade-backup", id: "backup-resumo" }),
     h("div", { id: "backup-tarefa" }),
@@ -1951,8 +1953,10 @@ function pintarResumoBackup() {
   const e = d.estado || {};
   const t = d.tarefa;
   emAndamento = t?.estado === "executando";
-  const botao = document.getElementById("backup-agora");
-  if (botao) botao.disabled = emAndamento;
+  for (const id of ["backup-agora", "backup-solucao"]) {
+    const botao = document.getElementById(id);
+    if (botao) botao.disabled = emAndamento;
+  }
 
   // Alerta: último falhou, ou nenhum backup bom nas últimas 48 h.
   const alerta = document.getElementById("backup-alerta");
@@ -2011,16 +2015,99 @@ async function fazerBackupAgora() {
   } catch (e) { toast(e.message, "erro"); }
 }
 
+/** Soluções que podem ter backup isolado (dentro do backup pelo manifesto e pelos Ajustes). */
+function solucoesComBackup() {
+  const d = estadoBackups.dados;
+  const fora = new Set(d.ajustes.excluir || []);
+  return d.solucoes.filter((s) => s.manifesto_inclui && !fora.has(s.id));
+}
+
+function dialogoBackupSolucao() {
+  const lista = solucoesComBackup();
+  const sel = h("select", { id: "bs-sol" }, lista.map((s) => h("option", { value: s.id }, s.nome)));
+  if (estadoBackups.filtro && lista.some((s) => s.id === estadoBackups.filtro)) sel.value = estadoBackups.filtro;
+  const erro = h("p", { class: "form-erro", role: "alert", hidden: true });
+  const botao = h("button", { type: "button", class: "botao primario", disabled: !lista.length, onclick: async () => {
+    botao.disabled = true;
+    try {
+      await api("/api/backups", { method: "POST", body: { solucao: sel.value } });
+      dlg.close();
+      estadoBackups.logAberto = true;
+      toast("Backup da solução iniciado.");
+      await atualizarBackups();
+    } catch (e) { erro.textContent = e.message; erro.hidden = false; botao.disabled = false; }
+  } }, "Fazer backup");
+  const dlg = dialogo({
+    titulo: "Backup de uma solução",
+    descricao: "Guarda só os dados desta solução: banco, pastas de dados, banco externo e Supabase. Não inclui o portal (usuários e acessos) nem as outras soluções.",
+    corpo: lista.length
+      ? [h("div", { class: "campo" }, h("label", { for: "bs-sol" }, "Solução"), sel), erro]
+      : h("p", { class: "nota" }, "Nenhuma solução está no backup (veja Ajustes)."),
+    rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), botao],
+  });
+}
+
+function dialogoApagarTodos(alvos, nomes) {
+  const sid = estadoBackups.filtro;
+  const fixados = alvos.filter((b) => b.fixado).length;
+  const apagar = alvos.length - fixados;
+  const conf = h("input", { type: "text", id: "ap-conf", autocomplete: "off", spellcheck: false });
+  const erro = h("p", { class: "form-erro", role: "alert", hidden: true });
+  const botao = h("button", { type: "button", class: "botao perigo-cheio", disabled: true, onclick: async () => {
+    botao.disabled = true;
+    try {
+      const r = await api("/api/backups/apagar", { method: "POST", body: { confirmacao: conf.value, solucao: sid } });
+      dlg.close();
+      toast(`${plural(r.apagados, "backup apagado", "backups apagados")}${r.fixados ? `; ${plural(r.fixados, "fixado mantido", "fixados mantidos")}` : ""}.`);
+      estadoBackups.dados = null;
+      await atualizarBackups();
+      pintarListaBackups();
+    } catch (e) { erro.textContent = e.message; erro.hidden = false; botao.disabled = false; }
+  } }, `Apagar ${plural(apagar, "backup", "backups")}`);
+  conf.addEventListener("input", () => { botao.disabled = conf.value.trim().toUpperCase() !== "APAGAR" || !apagar; });
+  const d = estadoBackups.dados;
+  const dlg = dialogo({
+    titulo: sid ? `Apagar os backups só de ${nomes.get(sid) || sid}?` : "Apagar todos os backups?",
+    corpo: [
+      h("p", { class: "dialogo-texto" }, sid
+        ? `Apaga ${plural(apagar, "backup feito só desta solução", "backups feitos só desta solução")}. Os backups completos têm todas as soluções e continuam na lista.`
+        : `Apaga ${plural(apagar, "backup", "backups")} desta pasta.` + (alvos.some((b) => !b.parcial && !b.fixado)
+          ? " Inclui os backups completos: até o próximo backup, não haverá como voltar os dados." : "")),
+      fixados ? h("p", { class: "dialogo-texto" }, `${plural(fixados, "backup fixado fica", "backups fixados ficam")}. Para apagar, desfixe antes.`) : null,
+      d.copia ? h("p", { class: "dialogo-texto" }, "A segunda cópia (pasta de rede) não é apagada.") : null,
+      h("p", { class: "dialogo-texto" }, "Não é possível desfazer."),
+      h("div", { class: "campo" }, h("label", { for: "ap-conf" }, "Para confirmar, digite APAGAR"), conf),
+      erro,
+    ],
+    rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), botao],
+  });
+}
+
 function pintarListaBackups() {
   const d = estadoBackups.dados;
   const alvo = document.getElementById("backup-corpo");
   const nomes = new Map(d.solucoes.map((s) => [s.id, s.nome]));
+  // Filtro por solução: os backups com dados dela (completos e os feitos só dela).
+  const temDados = (b, sid) => b.itens.some((i) => i.solucao === sid) || (b.parcial && (b.solucoes || []).includes(sid));
+  const comBackup = d.solucoes.filter((s) => d.backups.some((b) => temDados(b, s.id)));
+  if (estadoBackups.filtro && !comBackup.some((s) => s.id === estadoBackups.filtro)) estadoBackups.filtro = "";
+  const sid = estadoBackups.filtro;
+  const visiveis = sid ? d.backups.filter((b) => temDados(b, sid)) : d.backups;
+  const alvosApagar = sid ? d.backups.filter((b) => b.parcial && (b.solucoes || []).length === 1 && b.solucoes[0] === sid) : d.backups;
+  const barra = d.backups.length ? h("div", { class: "barra-ferramentas barra-backups" },
+    h("label", { class: "filtro-rotulo" }, "Mostrar",
+      h("select", { class: "filtro-select", onchange: (ev) => { estadoBackups.filtro = ev.target.value; pintarListaBackups(); } },
+        h("option", { value: "" }, "Todas as soluções"),
+        comBackup.map((s) => h("option", { value: s.id, selected: s.id === sid }, s.nome)))),
+    h("span", { class: "espaco" }),
+    alvosApagar.some((b) => !b.fixado) ? h("button", { type: "button", class: "botao pequeno perigo",
+      onclick: () => dialogoApagarTodos(alvosApagar, nomes) }, sid ? "Apagar os backups só desta solução" : "Apagar todos") : null) : null;
   if (!d.backups.length) {
     alvo.replaceChildren(h("div", { class: "vazio" }, h("strong", {}, "Nenhum backup ainda"),
       h("p", {}, d.ajustes.ativo ? `O primeiro automático sai ${dataIso(d.proximo).toLowerCase()}. Ou clique em Fazer backup agora.` : "Clique em Fazer backup agora.")));
     return;
   }
-  const linhas = d.backups.map((b) => {
+  const linhas = visiveis.map((b) => {
     const verif = b.verificacao;
     const situacao = !b.ok ? pilula("com_problema", "Com erros")
       : verif ? pilula(verif.ok ? "rodando" : "com_problema", verif.ok ? "Conferido" : "Problema na conferência")
@@ -2029,6 +2116,7 @@ function pintarListaBackups() {
       .filter((sid) => nomes.has(sid));
     return h("tr", { class: b.ok ? "" : "linha-erro" },
       h("td", {}, h("strong", {}, dataIso(b.criado_em)), h("div", { class: "sub" }, MOTIVOS_BACKUP[b.motivo] || b.motivo,
+        b.parcial && (b.solucoes || []).length ? `: ${b.solucoes.map((x) => nomes.get(x) || x).join(", ")}` : "",
         b.fixado ? h("span", { class: "etiqueta" }, "Fixado") : null)),
       h("td", {}, h("details", { class: "itens-backup" },
         h("summary", {}, `${plural(b.itens.length, "arquivo", "arquivos")} · ${tamanho(b.bytes)}`),
@@ -2050,10 +2138,11 @@ function pintarListaBackups() {
   });
   const aj = d.ajustes;
   alvo.replaceChildren(
+    barra,
     h("div", { class: "tabela-rolagem" }, h("table", { class: "tabela-simples tabela-backups" },
       h("thead", {}, h("tr", {}, ["Quando", "Conteúdo", "Situação", ""].map((x) => h("th", {}, x)))),
       h("tbody", {}, linhas))),
-    h("p", { class: "nota" }, `Guardados: os automáticos dos últimos ${plural(aj.manter_diarios, "dia", "dias")}, um por semana nas últimas ${aj.manter_semanais}, um por mês nos últimos ${aj.manter_mensais} e os ${aj.manter_avulsos} manuais mais recentes. Os fixados nunca são apagados.`));
+    h("p", { class: "nota" }, `Guardados: os automáticos dos últimos ${plural(aj.manter_diarios, "dia", "dias")}, um por semana nas últimas ${aj.manter_semanais}, um por mês nos últimos ${aj.manter_mensais} os ${aj.manter_avulsos} manuais completos mais recentes e os ${aj.manter_avulsos} mais recentes de cada solução. Os fixados nunca são apagados pela limpeza automática.`));
 }
 
 async function acaoBackup(url, method, body, ok) {
