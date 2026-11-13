@@ -42,6 +42,7 @@ from pathlib import Path
 
 from . import banco as banco_pg
 from . import docker_cli
+from . import supabase as sb
 from .config import Config
 from .manager import Gerenciador, Tarefa
 
@@ -91,6 +92,7 @@ class Ajustes:
     incluir_bancos: bool = True
     incluir_volumes: bool = True
     incluir_externos: bool = True
+    incluir_supabase: bool = True
     excluir: list[str] = field(default_factory=list)
     espaco_minimo_gb: float = 2.0
     copiar: bool = True
@@ -489,6 +491,14 @@ class Backups:
                 tentar(f"banco externo de {sol.id}",
                        lambda s=sol, u=url: self._backup_externo(parcial, item, pg, s, u))
 
+        # ---- Supabase das solucoes ([supabase] no manifesto) ----
+        if aj.incluir_supabase:
+            com_sb = [s for s in solucoes.values() if s.supabase]
+            if com_sb:
+                registrar("Supabase dos sistemas (banco, usuarios do login, arquivos e chaves)")
+            for sol in com_sb:
+                tentar(f"Supabase de {sol.id}", lambda s=sol: self._backup_supabase(parcial, item, s, registrar))
+
         # ---- manifesto ----
         man = {
             "formato": VERSAO_FORMATO,
@@ -551,6 +561,9 @@ class Backups:
         with tarfile.open(arq, "w:gz") as tar:
             for p in sorted(self.cfg.pasta_dados.glob("*.json")):
                 tar.add(p, arcname=p.name)
+            chaves_sb = self.cfg.pasta_dados / "supabase"
+            if chaves_sb.is_dir():  # chaves do Supabase de cada sistema
+                tar.add(chaves_sb, arcname="supabase")
             locais = self.cfg.pasta_solucoes_locais
             if locais.is_dir():
                 tar.add(locais, arcname=locais.name)
@@ -616,6 +629,62 @@ class Backups:
         host = re.sub(r"^.*@", "", url.split("?")[0]).split("/")[0]
         item("externo", arq, solucao=sol.id, configuracao=sol.backup_externo, servidor=host,
              esquemas=sol.backup_esquemas, tabelas=self._contar_tabelas_dump(pg, arq))
+
+    def _backup_supabase(self, parcial: Path, item, sol, registrar) -> None:
+        """Supabase proprio de uma solucao, em tres partes:
+
+        - chaves (dados/supabase/<id>.json): sem elas o banco restaurado nao abre (as senhas dos
+          papeis internos e o segredo dos tokens ficam gravados dentro dele);
+        - banco em pg_dump (com o sistema no ar), para conferir e para levar a outro lugar;
+        - os volumes (arquivos do PostgreSQL, configuracao, arquivos enviados), copiados com a
+          pilha parada por alguns segundos, para a copia ficar identica e consistente. E desta
+          copia que a restauracao volta.
+        """
+        sid = sol.id
+        seg_arq = sb.caminho_segredos(self.cfg.pasta_dados, sid)
+        vols = [(chave, sb.volume(sid, chave)) for chave in ("dados", "config", "arquivos", "snippets")]
+        vols = [(c, v) for c, v in vols if docker_cli.volume_existe(v)]
+        if not seg_arq.is_file() and not vols:
+            registrar(f"  -- {sid}: Supabase ainda nao criado (a solucao nunca foi iniciada)")
+            return
+        pasta = parcial / "supabase" / sid
+        pasta.mkdir(parents=True, exist_ok=True)
+        if seg_arq.is_file():
+            destino = pasta / "chaves.json"
+            shutil.copyfile(seg_arq, destino)
+            item("supabase-segredos", destino, solucao=sid)
+        seg = sb.segredos(self.cfg.pasta_dados, sid, criar=False)
+        db = sb.container(sid, "db")
+        if seg is not None and sb._estado(db)["rodando"]:
+            arq = pasta / "banco.dump"
+            env = {"PGPASSWORD": seg.senha_banco}
+            docker_cli.para_arquivo(["exec", "-e", "PGPASSWORD", db, "pg_dump", "-h", "localhost", "-U", "supabase_admin",
+                                     "-d", "postgres", "-Fc", "-Z", "6"], arq, env=env, timeout=3600)
+            tabelas = _tabelas_no_indice(docker_cli.de_arquivo(["exec", "-i", db, "pg_restore", "--list"], arq, timeout=600))
+            item("supabase-banco", arq, solucao=sid, tabelas=tabelas)
+        elif seg is None:
+            registrar(f"  -- {sid}: chaves do Supabase nao encontradas; vai so a copia dos arquivos do banco")
+        else:
+            registrar(f"  -- {sid}: Supabase parado; vai so a copia dos arquivos do banco")
+        if not vols:
+            return
+        parados = sb.pausar(sid)
+        inicio = time.time()
+        if parados:
+            registrar(f"  {sid}: Supabase parado para a copia ficar consistente")
+        try:
+            for chave, nome_vol in vols:
+                arq = pasta / f"{chave}.tar.gz"
+                docker_cli.para_arquivo(["run", "--rm", "--network", "none", "-v", f"{nome_vol}:/dados:ro",
+                                         "--entrypoint", "tar", self.cfg.backup_imagem,
+                                         "-czf", "-", "--numeric-owner", "-C", "/dados", "."], arq)
+                with tarfile.open(arq, "r:gz") as tar:
+                    arquivos = sum(1 for m in tar.getmembers() if m.isfile())
+                item("supabase-volume", arq, solucao=sid, chave=chave, volume=nome_vol, arquivos=arquivos)
+        finally:
+            if parados:
+                sb.retomar(sid, parados, lambda l: registrar("  " + l))
+                registrar(f"  {sid}: Supabase no ar de novo ({time.time() - inicio:.0f}s parado)")
 
     # ---------------- copia e retencao ----------------
     def _copiar(self, origem: Path, registrar) -> None:
@@ -731,7 +800,18 @@ class Backups:
                         n = self._contar_tabelas_dump(pg, arq)
                         registrar(f"  ok  {it['arquivo']}: indice legivel, {n} tabela(s)")
                         continue
-                    if it["tipo"] in ("volume", "portal") and arq.suffix == ".gz":
+                    if it["tipo"] == "supabase-banco":
+                        saida = docker_cli.de_arquivo(["run", "--rm", "-i", "--network", "none", "--entrypoint",
+                                                       "pg_restore", self.cfg.backup_imagem, "--list"], arq, timeout=600)
+                        registrar(f"  ok  {it['arquivo']}: indice legivel, {_tabelas_no_indice(saida)} tabela(s)")
+                        continue
+                    if it["tipo"] == "supabase-segredos":
+                        chaves = json.loads(arq.read_text(encoding="utf-8"))
+                        if not {"senha_banco", "jwt_secret", "anon", "service"} <= set(chaves):
+                            raise ErroBackup("arquivo de chaves incompleto")
+                        registrar(f"  ok  {it['arquivo']}")
+                        continue
+                    if it["tipo"] in ("volume", "portal", "supabase-volume") and arq.suffix == ".gz":
                         with tarfile.open(arq, "r:gz") as tar:
                             n = sum(1 for m in tar.getmembers() if m.isfile())
                         registrar(f"  ok  {it['arquivo']}: {n} arquivo(s)")
@@ -809,7 +889,8 @@ class Backups:
         registrar(f"  ok  {nome_vol} restaurado")
 
     def restaurar_solucao(self, nome: str, sid: str, banco: bool = True, arquivos: bool = True,
-                          registrar: Callable[[str], None] = print, seguranca: bool = True) -> None:
+                          registrar: Callable[[str], None] = print, seguranca: bool = True,
+                          supabase: bool = True) -> None:
         """Volta os dados de uma solucao (banco e/ou volumes) ao estado do backup `nome`.
 
         Antes: backup de seguranca so desta solucao e parada do container. Depois: inicia de novo
@@ -822,12 +903,18 @@ class Backups:
             raise ErroBackup(f"Solucao desconhecida neste portal: {sid}")
         dumps = [i for i in man["itens"] if i["tipo"] == "banco" and i.get("solucao") == sid] if banco else []
         vols = [i for i in man["itens"] if i["tipo"] == "volume" and i.get("solucao") == sid] if arquivos else []
-        if not dumps and not vols:
+        # O Supabase volta inteiro (banco, usuarios, arquivos e chaves juntos): partes de momentos
+        # diferentes nao combinam (ex.: um arquivo listado no banco que nao esta no disco).
+        sbs = [i for i in man["itens"] if i["tipo"] in ("supabase-volume", "supabase-segredos")
+               and i.get("solucao") == sid] if supabase else []
+        if sbs and not any(i["tipo"] == "supabase-volume" and i.get("chave") == "dados" for i in sbs):
+            raise ErroBackup(f"O backup {nome} nao tem a copia completa do Supabase de {sid}.")
+        if not dumps and not vols and not sbs:
             raise ErroBackup(f"O backup {nome} nao tem dados de {sid} para restaurar.")
         pg = self.cfg.postgres_container
         if dumps and not pg:
             raise ErroBackup("Este portal nao tem o PostgreSQL do servidor configurado.")
-        for it in dumps + vols:
+        for it in dumps + vols + sbs:
             if _sha256(pasta / it["arquivo"]) != it["sha256"]:
                 raise ErroBackup(f"{it['arquivo']} esta corrompido (sha256 diferente). Nada foi alterado.")
 
@@ -856,6 +943,16 @@ class Backups:
                     self._restaurar_banco(pg, pasta / it["arquivo"], it["banco"], dono, registrar)
                 for it in vols:
                     self._restaurar_volume(pasta / it["arquivo"], it["volume"], registrar)
+                if sbs:
+                    registrar(f"Parando o Supabase de {sid}")
+                    sb.parar(sid, registrar)
+                    for it in sbs:
+                        if it["tipo"] == "supabase-segredos":
+                            registrar("Restaurando as chaves do Supabase")
+                            sb.gravar_segredos(self.cfg.pasta_dados, sid, (pasta / it["arquivo"]).read_bytes())
+                    for it in sbs:
+                        if it["tipo"] == "supabase-volume":
+                            self._restaurar_volume(pasta / it["arquivo"], it["volume"], registrar)
             except Exception as exc:  # noqa: BLE001 - religa a solucao antes de avisar
                 falha = exc
                 registrar(f"ERRO: {exc}")
@@ -871,7 +968,8 @@ class Backups:
         if falha is not None:
             raise ErroBackup(f"Restauracao interrompida: {falha}. O banco atual so e trocado quando a restauracao inteira da certo. O backup de seguranca esta na lista.")
         self.auditoria("Restaurou backup", f"{sid} a partir de {nome}"
-                       + (" (banco)" if dumps else "") + (" (arquivos)" if vols else ""))
+                       + (" (banco)" if dumps else "") + (" (arquivos)" if vols else "")
+                       + (" (Supabase)" if sbs else ""))
 
     def restaurar_portal(self, nome: str, registrar: Callable[[str], None] = print) -> None:
         """Volta usuarios, acessos, configuracoes e segredos do portal ao estado do backup."""

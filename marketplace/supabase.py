@@ -459,6 +459,48 @@ def parar(sid: str, registrar: Callable[[str], None] = print) -> None:
         registrar("Supabase parado. Os dados foram mantidos.")
 
 
+def pausar(sid: str) -> list[str]:
+    """Para os containers da pilha que estao no ar (o gateway primeiro, o banco por ultimo) e
+    devolve quais eram, para `retomar`. Usado pelo backup: com o banco parado, a copia dos
+    arquivos dele fica consistente. Nao mexe no Studio."""
+    with _trava(sid):
+        no_ar = [s for s in SERVICOS if _estado(container(sid, s))["rodando"]]
+        for s in reversed(SERVICOS):
+            if s in no_ar:
+                docker_cli.stop(container(sid, s))
+        return no_ar
+
+
+def retomar(sid: str, servicos: list[str], registrar: Callable[[str], None] = print) -> None:
+    """Liga de novo os containers que `pausar` parou, na ordem certa, e espera ficarem prontos."""
+    with _trava(sid):
+        for s in SERVICOS:
+            if s not in servicos:
+                continue
+            docker_cli.rodar(["start", container(sid, s)], timeout=120)
+            if s == "db":
+                _esperar(container(sid, "db"), "banco do Supabase", 300, registrar)
+        if "gw" in servicos:
+            _esperar(container(sid, "gw"), "gateway do Supabase", 180, registrar)
+
+
+def caminho_segredos(pasta_dados: Path, sid: str) -> Path:
+    return _arquivo_segredos(pasta_dados, sid)
+
+
+def gravar_segredos(pasta_dados: Path, sid: str, conteudo: bytes) -> None:
+    """Grava o arquivo de segredos (vindo de um backup), so leitura para o dono."""
+    json.loads(conteudo)  # confere que e JSON antes de trocar
+    arq = _arquivo_segredos(pasta_dados, sid)
+    arq.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(arq.parent, 0o700)
+    tmp = arq.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(conteudo)
+    tmp.replace(arq)
+
+
 def remover_containers(sid: str, registrar: Callable[[str], None] = print) -> None:
     """Remove os containers da pilha (nunca os volumes: os dados ficam)."""
     with _trava(sid):

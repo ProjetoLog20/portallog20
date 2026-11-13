@@ -877,12 +877,12 @@ def api_backup_verificar(nome: str, _: Usuario = Depends(exigir_admin)) -> dict:
 
 @app.post("/api/backups/{nome}/restaurar")
 def api_backup_restaurar(nome: str, solucao: str = Body(..., embed=True), banco: bool = Body(True, embed=True),
-                         arquivos: bool = Body(True, embed=True), confirmacao: str = Body("", embed=True),
-                         autor: Usuario = Depends(exigir_admin)) -> dict:
+                         arquivos: bool = Body(True, embed=True), supabase: bool = Body(True, embed=True),
+                         confirmacao: str = Body("", embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
     if confirmacao.strip() != solucao:
         raise HTTPException(400, "Digite o identificador da solucao para confirmar.")
-    if not banco and not arquivos:
-        raise HTTPException(400, "Escolha o banco, os arquivos ou os dois.")
+    if not banco and not arquivos and not supabase:
+        raise HTTPException(400, "Escolha o que restaurar.")
     _solucao(solucao)
     t = ger().tarefas.get(solucao)
     if t and t.estado == "executando":
@@ -892,12 +892,13 @@ def api_backup_restaurar(nome: str, solucao: str = Body(..., embed=True), banco:
 
         def rodar(tarefa) -> None:
             tarefa.etapa = f"Restaurando {solucao}"
-            BACKUPS.restaurar_solucao(nome, solucao, banco=banco, arquivos=arquivos, registrar=tarefa.registrar)
+            BACKUPS.restaurar_solucao(nome, solucao, banco=banco, arquivos=arquivos, supabase=supabase,
+                                      registrar=tarefa.registrar)
 
         BACKUPS.em_segundo_plano(f"restaurar {solucao}", rodar)
     except ErroBackup as exc:
         raise HTTPException(409, str(exc)) from exc
-    partes = " e ".join(p for p, ok in (("banco", banco), ("arquivos", arquivos)) if ok)
+    partes = " e ".join(p for p, ok in (("banco", banco), ("arquivos", arquivos), ("Supabase", supabase)) if ok)
     AUTH.registrar(autor, "Restaurou backup", f"{solucao} ({partes}) a partir de {nome}")
     return {"ok": True}
 

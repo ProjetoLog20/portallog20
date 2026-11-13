@@ -1908,6 +1908,9 @@ function rotuloItem(it, nomes) {
   if (it.tipo === "banco") return `Banco ${it.banco}${sol ? ` (${sol})` : " (sem solução: criado à mão)"}`;
   if (it.tipo === "volume") return `Arquivos de ${sol}: ${it.chave}`;
   if (it.tipo === "externo") return `Banco externo de ${sol} (${it.servidor})`;
+  if (it.tipo === "supabase-banco") return `Supabase de ${sol}: banco (cópia para conferência)`;
+  if (it.tipo === "supabase-segredos") return `Supabase de ${sol}: chaves`;
+  if (it.tipo === "supabase-volume") return `Supabase de ${sol}: ${({ dados: "banco e usuários do login", config: "configuração do banco", arquivos: "arquivos enviados", snippets: "consultas salvas do Studio" })[it.chave] || it.chave}`;
   return it.arquivo;
 }
 
@@ -2022,7 +2025,7 @@ function pintarListaBackups() {
     const situacao = !b.ok ? pilula("com_problema", "Com erros")
       : verif ? pilula(verif.ok ? "rodando" : "com_problema", verif.ok ? "Conferido" : "Problema na conferência")
       : pilula("instalado", "Completo");
-    const restauraveis = [...new Set(b.itens.filter((i) => i.solucao && (i.tipo === "banco" || i.tipo === "volume")).map((i) => i.solucao))]
+    const restauraveis = [...new Set(b.itens.filter((i) => i.solucao && (i.tipo === "banco" || i.tipo === "volume" || i.tipo === "supabase-volume")).map((i) => i.solucao))]
       .filter((sid) => nomes.has(sid));
     return h("tr", { class: b.ok ? "" : "linha-erro" },
       h("td", {}, h("strong", {}, dataIso(b.criado_em)), h("div", { class: "sub" }, MOTIVOS_BACKUP[b.motivo] || b.motivo,
@@ -2074,11 +2077,14 @@ function dialogoRestaurar(b, restauraveis, nomes) {
     const itens = b.itens.filter((i) => i.solucao === sid);
     const banco = itens.find((i) => i.tipo === "banco");
     const vols = itens.filter((i) => i.tipo === "volume");
+    const sbase = itens.filter((i) => i.tipo === "supabase-volume" || i.tipo === "supabase-segredos");
     partes.replaceChildren(
       banco ? h("label", { class: "campo-check" }, h("input", { type: "checkbox", name: "banco", checked: true }),
         h("span", {}, h("strong", {}, "Banco de dados"), h("small", {}, ` ${banco.banco}${banco.tabelas != null ? `, ${plural(banco.tabelas, "tabela", "tabelas")}` : ""}, ${tamanho(banco.bytes)}`))) : null,
       vols.length ? h("label", { class: "campo-check" }, h("input", { type: "checkbox", name: "arquivos", checked: true }),
-        h("span", {}, h("strong", {}, "Arquivos"), h("small", {}, ` ${vols.map((v) => v.chave).join(", ")}, ${tamanho(vols.reduce((s, v) => s + v.bytes, 0))}`))) : null);
+        h("span", {}, h("strong", {}, "Arquivos"), h("small", {}, ` ${vols.map((v) => v.chave).join(", ")}, ${tamanho(vols.reduce((s, v) => s + v.bytes, 0))}`))) : null,
+      sbase.length ? h("label", { class: "campo-check" }, h("input", { type: "checkbox", name: "supabase", checked: true }),
+        h("span", {}, h("strong", {}, "Supabase do sistema"), h("small", {}, ` banco, usuários do login, arquivos e chaves, juntos; ${tamanho(sbase.reduce((s, v) => s + v.bytes, 0))}`))) : null);
     rotuloConf.textContent = `Para confirmar, digite ${sid}`;
     confirmacao.value = "";
     botao.disabled = true;
@@ -2099,10 +2105,11 @@ function dialogoRestaurar(b, restauraveis, nomes) {
     ev.preventDefault();
     const banco = !!form.querySelector("[name=banco]")?.checked;
     const arquivos = !!form.querySelector("[name=arquivos]")?.checked;
-    if (!banco && !arquivos) { toast("Marque o banco, os arquivos ou os dois.", "erro"); return; }
+    const supabase = !!form.querySelector("[name=supabase]")?.checked;
+    if (!banco && !arquivos && !supabase) { toast("Marque o que deve voltar.", "erro"); return; }
     botao.disabled = true;
     try {
-      await api(`/api/backups/${b.nome}/restaurar`, { method: "POST", body: { solucao: sel.value, banco, arquivos, confirmacao: confirmacao.value.trim() } });
+      await api(`/api/backups/${b.nome}/restaurar`, { method: "POST", body: { solucao: sel.value, banco, arquivos, supabase, confirmacao: confirmacao.value.trim() } });
       dlg.close();
       estadoBackups.logAberto = true;
       toast("Restauração iniciada. Acompanhe o registro.");
@@ -2293,6 +2300,7 @@ function pintarAjustesBackup() {
     h("section", { class: "painel" }, h("h2", {}, "O que copiar"),
       check("incluir_bancos", "Bancos do PostgreSQL do servidor", d.postgres ? "Todos, inclusive os criados à mão no pgAdmin." : "Este servidor não tem o PostgreSQL do portal.", { disabled: !d.postgres }),
       check("incluir_volumes", "Arquivos das soluções", "As pastas de dados (volumes) de cada solução, como planilhas importadas e uploads."),
+      check("incluir_supabase", "Supabase dos sistemas", "Banco, usuários do login, arquivos e chaves do Supabase de cada sistema (como o Panorama). Para a cópia ficar consistente, o Supabase de cada sistema para por alguns segundos durante o backup."),
       check("incluir_externos", "Bancos externos", "O banco de uma solução fora do servidor (ex.: Supabase), quando o manifesto indica em [backup] banco_externo."),
       check("incluir_portal", "Dados do portal", "Usuários, acessos, histórico, configurações e senhas das soluções."),
       h("h3", { class: "topo-16" }, "Soluções"),
@@ -2320,7 +2328,7 @@ function pintarAjustesBackup() {
       manter_diarios: Number(val("manter_diarios").value), manter_semanais: Number(val("manter_semanais").value),
       manter_mensais: Number(val("manter_mensais").value), manter_avulsos: Number(val("manter_avulsos").value),
       incluir_bancos: val("incluir_bancos").checked, incluir_volumes: val("incluir_volumes").checked,
-      incluir_externos: val("incluir_externos").checked, incluir_portal: val("incluir_portal").checked,
+      incluir_externos: val("incluir_externos").checked, incluir_supabase: val("incluir_supabase").checked, incluir_portal: val("incluir_portal").checked,
       verificar: val("verificar").checked, espaco_minimo_gb: val("espaco_minimo_gb").value,
       copiar: val("copiar").checked, aviso_webhook: val("aviso_webhook").value.trim(),
       excluir: d.solucoes.filter((s) => s.manifesto_inclui && !form.querySelector(`[name=sol][value="${s.id}"]`).checked).map((s) => s.id),

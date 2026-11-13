@@ -311,7 +311,7 @@ a chave da origem só passam pela memória: não são gravadas nem aparecem no l
 container do banco local, que já tem o `pg_dump`/`psql` da mesma versão. Pode repetir quando quiser
 (ex.: para trazer os dados mais novos antes de desligar a nuvem).
 
-**Ainda não incluído** (próxima etapa): o banco e os arquivos do Supabase no backup diário.
+**Backup:** o Supabase de cada sistema entra no backup diário (ver "Backup e restauração").
 
 **Quem usou a primeira versão** (`PORTAL_SUPABASE=sim`, containers `log20-supabase-*`, API na
 8111): ela não é mais usada nem atualizada. O `atualizar.sh` avisa e mostra como desligá-la; os
@@ -374,9 +374,15 @@ Tela **Backups** (administradores). Por padrão, todo dia às 02:30 o portal cop
 | As contas do banco | `pg_dumpall --globals-only` |
 | As pastas de dados das soluções (`[execucao.volumes]`) | `.tar.gz` de cada volume |
 | Bancos externos, como o Supabase da Central | `pg_dump` da URL na configuração indicada em `[backup] banco_externo` do manifesto |
-| Os dados do portal | `portal.db` (usuários, acessos, histórico) e `dados/*.json` (configurações e senhas das soluções), mais as soluções criadas pelo assistente |
+| O Supabase de cada sistema (`[supabase]`) | chaves (`dados/supabase/<id>.json`), `pg_dump` do banco para conferência e `.tar.gz` dos volumes `log20-sb-<id>-dados|config|arquivos|snippets` |
+| Os dados do portal | `portal.db` (usuários, acessos, histórico) e `dados/*.json` (configurações e senhas das soluções), as chaves do Supabase de cada sistema e as soluções criadas pelo assistente |
 
-O backup só lê: nada do que está em uso é parado ou alterado. Cada backup é uma pasta
+O backup só lê: nada do que está em uso é alterado. A única parada é a do **Supabase de cada
+sistema**: para a cópia dos arquivos do banco ficar idêntica e consistente, a pilha dele para por
+alguns segundos (o tempo de compactar os volumes) e volta sozinha; o registro mostra quanto tempo
+ficou parada. A restauração do Supabase volta tudo junto (banco, usuários do login, arquivos e
+chaves), porque partes de momentos diferentes não combinam; na tela, é a opção "Supabase do
+sistema" de **Restaurar…**, e na linha de comando, `--sem-supabase` deixa de fora. Cada backup é uma pasta
 `AAAA-MM-DD_HHMMSS_<motivo>` com um `manifesto.json` (arquivos, tamanhos, sha256, erros); a pasta
 só ganha o nome final quando termina. Os arquivos ficam fechados (só root), porque têm senhas.
 

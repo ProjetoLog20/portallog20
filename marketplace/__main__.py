@@ -176,7 +176,7 @@ def cmd_restaurar(args: argparse.Namespace) -> int:
         print(f"ERRO: {exc}", file=sys.stderr)
         return 1
     if args.tudo:
-        alvos = sorted({i["solucao"] for i in man["itens"] if i.get("solucao") and i["tipo"] in ("banco", "volume")})
+        alvos = sorted({i["solucao"] for i in man["itens"] if i.get("solucao") and i["tipo"] in ("banco", "volume", "supabase-volume")})
         portal = True
     else:
         alvos = args.solucao or []
@@ -188,7 +188,8 @@ def cmd_restaurar(args: argparse.Namespace) -> int:
     if portal:
         partes.append("os usuarios, acessos, configuracoes e segredos do PORTAL")
     for sid in alvos:
-        o_que = [p for p, ok in (("banco", not args.sem_banco), ("arquivos", not args.sem_arquivos)) if ok]
+        o_que = [p for p, ok in (("banco", not args.sem_banco), ("arquivos", not args.sem_arquivos),
+                                 ("Supabase", not args.sem_supabase)) if ok]
         partes.append(f"{sid} ({' e '.join(o_que)})")
     print(f"Backup {args.nome} ({man.get('criado_em', '')})")
     print("Vai voltar ao estado do backup: " + "; ".join(partes) + ".")
@@ -206,7 +207,7 @@ def cmd_restaurar(args: argparse.Namespace) -> int:
         for sid in alvos:
             print(f"\n==> {sid}")
             servico.restaurar_solucao(args.nome, sid, banco=not args.sem_banco, arquivos=not args.sem_arquivos,
-                                      registrar=print, seguranca=not args.tudo)
+                                      supabase=not args.sem_supabase, registrar=print, seguranca=not args.tudo)
     except ErroBackup as exc:
         print(f"ERRO: {exc}", file=sys.stderr)
         return 1
@@ -318,6 +319,7 @@ def main() -> None:
     p_res.add_argument("--tudo", action="store_true", help="Portal e todas as solucoes do backup")
     p_res.add_argument("--sem-banco", action="store_true", help="Nao restaura o banco")
     p_res.add_argument("--sem-arquivos", action="store_true", help="Nao restaura os volumes")
+    p_res.add_argument("--sem-supabase", action="store_true", help="Nao restaura o Supabase do sistema")
     p_res.add_argument("--sim", action="store_true", help="Nao pede confirmacao")
     p_sup = sub.add_parser("supabase", help="Supabase de cada solucao ([supabase] no manifesto)")
     p_sup.add_argument("acao", choices=["listar", "conferir", "subir", "parar"],
