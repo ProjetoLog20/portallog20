@@ -815,7 +815,8 @@ def api_backups(_: Usuario = Depends(exigir_admin)) -> dict:
     solucoes = []
     for sol in sorted(ger().solucoes.values(), key=lambda s: s.nome.lower()):
         solucoes.append({"id": sol.id, "nome": sol.nome, "banco": bool(sol.banco), "volumes": list(sol.volumes),
-                         "externo": sol.backup_externo, "manifesto_inclui": sol.backup_incluir})
+                         "externo": sol.backup_externo, "supabase": bool(sol.supabase),
+                         "manifesto_inclui": sol.backup_incluir})
     return {
         "pasta": str(BACKUPS.pasta),
         "copia": str(CFG.backup_copia) if CFG.backup_copia else None,
@@ -893,8 +894,9 @@ def api_backups_apagar_todos(confirmacao: str = Body("", embed=True), solucao: s
         raise HTTPException(409, str(exc)) from exc
     AUTH.registrar(autor, "Apagou backups de uma vez",
                    f"{len(r['apagados'])} backup(s)" + (f" isolados de {solucao}" if solucao else "")
-                   + (f"; {r['fixados']} fixado(s) mantido(s)" if r["fixados"] else ""))
-    return {"ok": True, "apagados": len(r["apagados"]), "fixados": r["fixados"]}
+                   + (f"; {r['fixados']} fixado(s) mantido(s)" if r["fixados"] else "")
+                   + (f"; {len(r['erros'])} com erro" if r["erros"] else ""))
+    return {"ok": True, "apagados": len(r["apagados"]), "fixados": r["fixados"], "erros": r["erros"]}
 
 
 @app.post("/api/backups/{nome}/verificar")

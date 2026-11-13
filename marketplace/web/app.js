@@ -2019,7 +2019,9 @@ async function fazerBackupAgora() {
 function solucoesComBackup() {
   const d = estadoBackups.dados;
   const fora = new Set(d.ajustes.excluir || []);
-  return d.solucoes.filter((s) => s.manifesto_inclui && !fora.has(s.id));
+  // Só as que têm algo para guardar (banco, pastas de dados, banco externo ou Supabase).
+  return d.solucoes.filter((s) => s.manifesto_inclui && !fora.has(s.id)
+    && (s.banco || s.volumes.length || s.externo || s.supabase));
 }
 
 function dialogoBackupSolucao() {
@@ -2058,7 +2060,8 @@ function dialogoApagarTodos(alvos, nomes) {
     try {
       const r = await api("/api/backups/apagar", { method: "POST", body: { confirmacao: conf.value, solucao: sid } });
       dlg.close();
-      toast(`${plural(r.apagados, "backup apagado", "backups apagados")}${r.fixados ? `; ${plural(r.fixados, "fixado mantido", "fixados mantidos")}` : ""}.`);
+      const falhas = r.erros?.length ? `; ${plural(r.erros.length, "não pôde ser apagado", "não puderam ser apagados")}: ${r.erros.join("; ")}` : "";
+      toast(`${plural(r.apagados, "backup apagado", "backups apagados")}${r.fixados ? `; ${plural(r.fixados, "fixado mantido", "fixados mantidos")}` : ""}${falhas}.`, falhas ? "erro" : undefined);
       estadoBackups.dados = null;
       await atualizarBackups();
       pintarListaBackups();

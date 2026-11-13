@@ -373,16 +373,18 @@ class Backups:
 
     # ======================================================================== backup
     def fazer(self, motivo: str, registrar: Callable[[str], None] = print,
-              somente: list[str] | None = None, incluir_portal: bool | None = None) -> dict:
-        """Faz um backup e devolve o manifesto. `somente`: ids de solucoes (backup parcial)."""
+              somente: list[str] | None = None, incluir_portal: bool | None = None,
+              recusar_vazio: bool = False) -> dict:
+        """Faz um backup e devolve o manifesto. `somente`: ids de solucoes (backup parcial).
+        `recusar_vazio`: sem nada para guardar, desiste sem gravar (nem copia, nem limpeza)."""
         if motivo not in MOTIVOS:
             raise ErroBackup(f"Motivo invalido: {motivo}")
         self._preparar_pasta(self.pasta)
         with Trava(self.pasta).segurar():
-            return self._fazer(motivo, registrar, somente, incluir_portal)
+            return self._fazer(motivo, registrar, somente, incluir_portal, recusar_vazio)
 
     def _fazer(self, motivo: str, registrar: Callable[[str], None], somente: list[str] | None,
-               incluir_portal: bool | None) -> dict:
+               incluir_portal: bool | None, recusar_vazio: bool = False) -> dict:
         aj = self.ajustes()
         ger = self._ger()
         tz = fuso(self.cfg)
@@ -501,6 +503,11 @@ class Backups:
                 registrar("Supabase dos sistemas (banco, usuarios do login, arquivos e chaves)")
             for sol in com_sb:
                 tentar(f"Supabase de {sol.id}", lambda s=sol: self._backup_supabase(parcial, item, s, registrar))
+
+        if recusar_vazio and not itens and not erros:
+            shutil.rmtree(parcial, ignore_errors=True)
+            raise ErroBackup("Nada para guardar: " + (", ".join(sorted(solucoes)) or "nenhuma solucao")
+                             + " ainda nao tem banco, pastas de dados nem Supabase.")
 
         # ---- manifesto ----
         man = {
@@ -735,7 +742,7 @@ class Backups:
         grupos: dict[tuple, list[dict]] = {}
         for a in avulsos:
             if a.get("parcial"):
-                grupos.setdefault(tuple(sorted(a.get("solucoes") or [])), []).append(a)
+                grupos.setdefault((a.get("motivo") == "solucao", tuple(sorted(a.get("solucoes") or []))), []).append(a)
         for lista_grupo in grupos.values():
             ficar.update(m["nome"] for m in lista_grupo[:aj.manter_avulsos])
         ficar.update(m["nome"] for m in lista if m.get("fixado"))
@@ -778,19 +785,19 @@ class Backups:
             raise ErroBackup(f"Solucao desconhecida: {sid}")
         if not sol.backup_incluir or sid in self.ajustes().excluir:
             raise ErroBackup(f"{sol.nome} esta fora do backup (manifesto ou Ajustes).")
-        man = self.fazer("solucao", registrar, somente=[sid])
-        if not man["itens"] and not man["erros"]:
-            # Nada para guardar (ex.: nunca foi iniciada): nao deixa um backup vazio na lista.
-            with Trava(self.pasta).segurar():
-                shutil.rmtree(self.pasta / man["nome"], ignore_errors=True)
-            raise ErroBackup(f"{sol.nome} ainda nao tem dados para guardar (banco, pastas ou Supabase).")
-        return man
+        try:
+            return self.fazer("solucao", registrar, somente=[sid], recusar_vazio=True)
+        except ErroBackup as exc:
+            if str(exc).startswith("Nada para guardar"):
+                raise ErroBackup(f"{sol.nome} ainda nao tem dados para guardar (banco, pastas ou Supabase).") from exc
+            raise
 
     def apagar_todos(self, solucao: str | None = None) -> dict:
         """Apaga de uma vez os backups desta pasta, menos os fixados. Com `solucao`: so os
         backups isolados dela (os completos tem todas as solucoes e ficam). A segunda copia
         (pasta de rede) nao e tocada."""
         apagados: list[str] = []
+        erros: list[str] = []
         fixados = 0
         with Trava(self.pasta).segurar():
             for m in self.listar():
@@ -799,9 +806,12 @@ class Backups:
                 if m.get("fixado"):
                     fixados += 1
                     continue
-                shutil.rmtree(self.pasta / m["nome"])
-                apagados.append(m["nome"])
-        return {"apagados": apagados, "fixados": fixados}
+                try:
+                    shutil.rmtree(self.pasta / m["nome"])
+                    apagados.append(m["nome"])
+                except OSError as exc:
+                    erros.append(f"{m['nome']}: {exc}")
+        return {"apagados": apagados, "fixados": fixados, "erros": erros}
 
     def remover(self, nome: str) -> None:
         pasta, man = self.obter(nome)
