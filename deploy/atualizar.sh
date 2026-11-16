@@ -42,7 +42,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ ! -f .env ] || [ ! -f docker-compose.yml ]; then
-  erro "Nao achei .env e docker-compose.yml nesta pasta. Na primeira instalacao use: bash deploy/preparar-vm.sh"
+  erro "Nao foi possivel encontrar .env e docker-compose.yml nesta pasta. Na primeira instalacao use: bash deploy/preparar-vm.sh"
   exit 1
 fi
 

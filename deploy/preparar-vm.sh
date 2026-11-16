@@ -51,7 +51,7 @@ if [ -z "$IP" ]; then
   IP="$(hostname -I | awk '{print $1}')"
 fi
 if [ -z "$IP" ]; then
-  echo "Nao consegui descobrir o IP. Rode de novo informando: bash deploy/preparar-vm.sh <ip>" >&2
+  echo "Nao foi possivel descobrir o IP. Rode de novo informando: bash deploy/preparar-vm.sh <ip>" >&2
   exit 1
 fi
 
