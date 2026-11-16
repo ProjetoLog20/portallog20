@@ -370,6 +370,18 @@ class Autenticacao:
                 db.executemany("DELETE FROM acessos WHERE usuario_id = ? AND solucao_id = ?", pares)
             return db.total_changes - antes
 
+    def retirar_de_todos(self, solucoes: list[str]) -> list[tuple[str, str]]:
+        """Apaga as liberacoes destas solucoes (de todos os usuarios). Devolve [(usuario, solucao)]."""
+        if not solucoes:
+            return []
+        with self._db() as db:
+            marcas = ",".join("?" * len(solucoes))
+            pares = [(r["usuario"], r["solucao_id"]) for r in db.execute(
+                f"SELECT u.usuario, a.solucao_id FROM acessos a JOIN usuarios u ON u.id = a.usuario_id"
+                f" WHERE a.solucao_id IN ({marcas})", list(solucoes))]
+            db.execute(f"DELETE FROM acessos WHERE solucao_id IN ({marcas})", list(solucoes))
+        return pares
+
     def nomes(self, uids: list[int]) -> dict[int, str]:
         if not uids:
             return {}

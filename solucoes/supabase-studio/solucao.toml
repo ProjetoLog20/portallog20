@@ -1,8 +1,8 @@
 # Painel do Supabase (Studio). Aparece no catalogo quando alguma solucao usa o Supabase do
 # servidor ([supabase] no manifesto). E um so para o servidor e mostra um projeto de cada vez: quem
 # escolhe o projeto e o botao "Abrir o Studio" na tela da solucao (Gerenciar). O portal nao constroi
-# nem inicia este servico por aqui; ele so publica a porta, pede o login do portal, controla quem
-# acessa (tela Acessos) e mostra se esta no ar.
+# nem inicia este servico por aqui; ele so publica a porta, pede o login do portal e mostra se esta
+# no ar. So administradores do portal abrem (somente_admin): da acesso total ao banco.
 
 id = "supabase-studio"
 nome = "Supabase Studio"
@@ -12,12 +12,13 @@ versao = "2.0.0"
 responsavel = "Administradores do portal"
 tags = ["banco", "supabase", "administracao"]
 requer = "supabase"
+somente_admin = true
 descricao = """
 Painel de administracao do Supabase dos sistemas feitos sobre ele (como o Panorama). Cada sistema
 tem o seu Supabase; o painel mostra um de cada vez. Para escolher qual, abra a solucao em
 Gerenciar e clique em "Abrir o Studio".
 
-Da acesso total ao banco do sistema: libere so para administradores.
+Da acesso total ao banco do sistema: so administradores do portal abrem.
 """
 
 [execucao]

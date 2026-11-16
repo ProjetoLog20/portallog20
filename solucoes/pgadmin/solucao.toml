@@ -1,6 +1,6 @@
 # pgAdmin: administracao do PostgreSQL do servidor pelo navegador.
-# Fica atras do portal como qualquer solucao: so abre para quem esta logado e tem acesso.
-# Libere SO para quem administra os bancos (administradores do portal ja veem tudo).
+# Fica atras do portal e so abre para administradores do portal (somente_admin): da acesso
+# total aos bancos de todas as solucoes, entao nao pode ser liberado para usuarios em Acessos.
 
 id = "pgadmin"
 nome = "pgAdmin (bancos de dados)"
@@ -9,6 +9,7 @@ categoria = "Infraestrutura"
 versao = "9"
 responsavel = "TI LOG20"
 tags = ["banco", "postgres", "admin"]
+somente_admin = true
 descricao = """
 pgAdmin já configurado com o PostgreSQL do servidor, onde ficam os bancos das soluções
 (por exemplo jornada_lideranca).
@@ -18,7 +19,7 @@ servidor "PostgreSQL do servidor", ele pede a senha do banco: a do usuário post
 da VM (PORTAL_POSTGRES_SENHA). Para só consultar uma solução, prefira o usuário dela
 (ex.: app_jornada_lideranca), que só enxerga o próprio banco.
 
-Quem acessa aqui pode ler e alterar os dados de todas as soluções: libere com cuidado.
+Quem acessa aqui pode ler e alterar os dados de todas as soluções: por isso só os administradores do portal abrem.
 """
 
 [build]

@@ -54,6 +54,23 @@ def _carregar() -> None:
     _estado["erros"] = erros
     _estado["gerenciador"] = Gerenciador(solucoes, Armazenamento(CFG.pasta_dados), CFG)
     _estado["proxy"] = _atualizar_proxy(list(solucoes.values()))
+    _limpar_somente_admin(solucoes)
+
+
+def _limpar_somente_admin(solucoes: dict) -> None:
+    """Liberacoes antigas de solucoes que agora sao so de administradores deixam de existir."""
+    so_admin = [sid for sid, s in solucoes.items() if s.somente_admin]
+    try:
+        retiradas = AUTH.retirar_de_todos(so_admin)
+    except NameError:  # primeira carga: AUTH ainda nao existe (a limpeza roda no startup)
+        return
+    if retiradas:
+        por_sol: dict[str, list[str]] = {}
+        for usuario, sid in retiradas:
+            por_sol.setdefault(sid, []).append(usuario)
+        for sid, usuarios in por_sol.items():
+            AUTH.registrar(None, "Retirou acesso",
+                           f"{solucoes[sid].nome} para {', '.join(sorted(usuarios))} (agora só administradores)")
 
 
 def _atualizar_proxy(solucoes) -> dict | None:
@@ -85,6 +102,7 @@ USO = Uso(CFG, ger, lambda: BACKUPS.pasta)
 
 @app.on_event("startup")
 def _iniciar_agendador() -> None:
+    _limpar_somente_admin(ger().solucoes)
     BACKUPS.iniciar_agendador()
     USO.iniciar()
 
@@ -256,7 +274,11 @@ def api_verificar(request: Request, solucao: str):
             return _pagina_aviso("Entre no portal primeiro",
                                  "Este sistema só é exibido para quem está conectado ao Portal de Soluções.", 401)
         return JSONResponse({"detail": "Sessao do portal expirada. Entre novamente."}, status_code=401)
-    if solucao not in ger().solucoes or not AUTH.pode_acessar(usuario, solucao):
+    if solucao not in ger().solucoes or not _pode_abrir(usuario, ger().solucoes[solucao]):
+        if navegacao and solucao in ger().solucoes and ger().solucoes[solucao].somente_admin:
+            return _pagina_aviso("Só para administradores",
+                                 f"{usuario.nome}, este sistema dá acesso total aos bancos de dados e só abre "
+                                 "para administradores do portal.", 403)
         if navegacao:
             return _pagina_aviso("Acesso não liberado",
                                  f"{usuario.nome}, este sistema não está liberado para você. "
@@ -277,7 +299,7 @@ def _logo_url(sol: Solucao) -> str | None:
 @app.get("/api/solucoes/{sid}/logo", include_in_schema=False)
 def api_logo(sid: str, usuario: Usuario = Depends(exigir_liberado)):
     sol = ger().solucoes.get(sid)
-    if sol is None or sol.logo is None or not sol.logo.is_file() or not AUTH.pode_acessar(usuario, sid):
+    if sol is None or sol.logo is None or not sol.logo.is_file() or not _pode_abrir(usuario, sol):
         raise HTTPException(404, "Logo nao encontrada")
     resp = FileResponse(sol.logo)
     resp.headers["Cache-Control"] = "private, max-age=86400"
@@ -292,7 +314,7 @@ def api_meus_sistemas(usuario: Usuario = Depends(exigir_liberado)) -> dict:
     permitidas = None if usuario.admin else AUTH.acessos(usuario.id)
     itens = []
     for sol in ger().solucoes.values():
-        if permitidas is not None and sol.id not in permitidas:
+        if permitidas is not None and (sol.id not in permitidas or sol.somente_admin):
             continue
         estado = ger().status(sol)["estado"] if docker_ok else "indisponivel"
         itens.append({
@@ -330,6 +352,7 @@ def _resumo(sol: Solucao, docker_ok: bool) -> dict:
         "status": status,
         "local": sol.local,
         "externo": bool(sol.externo),
+        "somente_admin": sol.somente_admin,
     }
 
 
@@ -379,6 +402,7 @@ def api_detalhe(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
         "campos_banco": sorted(sol.banco) if sol.banco else [],
         "supabase": _detalhe_supabase(sol, docker_ok),
         "externo": bool(sol.externo),
+        "somente_admin": sol.somente_admin,
         "local": sol.local,
         "dockerfile_portal": bool(sol.dockerfile_portal),
         "acessos_demo": [vars(a) for a in sol.acessos_demo],
@@ -852,11 +876,20 @@ def api_remover_local(sid: str, autor: Usuario = Depends(exigir_admin)) -> dict:
 
 # ---------------- administracao: usuarios ----------------
 
-def _validar_solucoes(ids: list[str]) -> list[str]:
+def _validar_solucoes(ids: list[str], conceder: bool = True) -> list[str]:
     desconhecidas = [s for s in ids if s not in ger().solucoes]
     if desconhecidas:
         raise HTTPException(400, f"Solucoes desconhecidas: {', '.join(desconhecidas)}")
+    so_admin = [ger().solucoes[s].nome for s in ids if ger().solucoes[s].somente_admin]
+    if so_admin and conceder:
+        raise HTTPException(400, f"{', '.join(so_admin)}: só administradores do portal acessam. "
+                                 "Para liberar, torne a pessoa administradora.")
     return ids
+
+
+def _pode_abrir(usuario: Usuario, sol: Solucao) -> bool:
+    """Admin abre tudo; os demais, o que foi liberado em Acessos e nao e so de administradores."""
+    return usuario.admin or (not sol.somente_admin and AUTH.pode_acessar(usuario, sol.id))
 
 
 def _nomes_solucoes(ids) -> str:
@@ -873,7 +906,8 @@ def api_usuarios(_: Usuario = Depends(exigir_admin)) -> dict:
     return {
         "usuarios": AUTH.listar(),
         "solucoes": [
-            {"id": s.id, "nome": s.nome, "categoria": s.categoria, "logo": _logo_url(s)}
+            {"id": s.id, "nome": s.nome, "categoria": s.categoria, "logo": _logo_url(s),
+             "somente_admin": s.somente_admin}
             for s in ger().solucoes.values()
         ],
     }
@@ -926,9 +960,12 @@ def api_editar_usuario(
     antes = AUTH.obter(uid)
     if antes is None:
         raise HTTPException(404, "Usuario nao encontrado")
-    if solucoes is not None:
-        _validar_solucoes(solucoes)
     acessos_antes = AUTH.acessos(uid)
+    if solucoes is not None:
+        _validar_solucoes(solucoes, conceder=False)
+        _validar_solucoes([s for s in solucoes if s not in acessos_antes])  # so as novas liberacoes
+        # Liberacao antiga de solucao so de administradores nao bloqueia a edicao: sai da lista.
+        solucoes = [s for s in solucoes if not ger().solucoes[s].somente_admin]
     atualizado = AUTH.atualizar(uid, nome=nome, perfil=perfil, ativo=ativo, autor=autor)
     if solucoes is not None:
         AUTH.definir_acessos(uid, [] if atualizado.admin else solucoes)
@@ -996,7 +1033,7 @@ def api_acessos(
     autor: Usuario = Depends(exigir_admin),
 ) -> dict:
     """Libera (conceder=true) ou retira sistemas de varios usuarios de uma vez."""
-    _validar_solucoes(solucoes)
+    _validar_solucoes(solucoes, conceder)
     alterados = AUTH.alterar_acessos(usuarios, solucoes, conceder)
     if alterados:
         nomes = AUTH.nomes(usuarios)

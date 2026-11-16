@@ -10,6 +10,9 @@ Portal para disponibilizar soluções conteinerizadas, com login.
     retirar sistemas e desativar/reativar de uma vez;
   - **Acessos**: tabela pessoa × sistema para marcar quem abre o quê (vale na hora) e o
     **histórico** de quem mudou o quê (criações, acessos, perfis, senhas redefinidas).
+    Sistemas com `somente_admin = true` no manifesto (pgAdmin e Supabase Studio, que dão acesso
+    total aos bancos) abrem só para administradores: não podem ser liberados, o backend recusa, e
+    liberações antigas são retiradas ao iniciar o portal (fica registrado no histórico).
 
 Cada solução é descrita por um manifesto (`solucoes/<id>/solucao.toml`). A primeira
 publicada é a **Central do Colaborador (Yuri)**.
@@ -290,7 +293,7 @@ Supabase dela).
 | Onde | O quê | Acesso |
 | --- | --- | --- |
 | **Mesmo endereço do sistema** (`/rest/v1`, `/auth/v1`, `/storage/v1`, `/realtime/v1`) | API que o site usa | Login do portal e liberação do sistema em **Acessos** (como o próprio sistema); depois, as chaves e as regras (RLS) do Supabase. Sem porta extra e sem CORS. |
-| **8112** | **Supabase Studio** (painel; um só no servidor) | Login do portal + liberação em **Acessos**. Mostra um sistema de cada vez: em **Gerenciar**, o botão **Abrir o Studio** aponta o painel para o sistema. Dá acesso total ao banco: só administradores. |
+| **8112** | **Supabase Studio** (painel; um só no servidor) | Login do portal, **só administradores** (`somente_admin`). Mostra um sistema de cada vez: em **Gerenciar**, o botão **Abrir o Studio** aponta o painel para o sistema. Dá acesso total ao banco. |
 
 **Troca de IP:** o endereço vai gravado no site na construção. O portal guarda com que valores
 construiu a imagem; no próximo Iniciar (o `atualizar.sh` reinicia tudo quando o IP muda), se o

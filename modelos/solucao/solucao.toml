@@ -41,6 +41,10 @@ tags = []  # ex.: ["frota", "indicadores"]
 # um monograma com as iniciais do nome. Apague a linha se nao tiver logo.
 # logo = "logo.png"
 
+# true: so administradores do portal abrem (ex.: paineis com acesso total a bancos). Nao aparece
+# para liberar na tela Acessos. Apague a linha se nao precisar.
+# somente_admin = true
+
 # Variaveis geradas automaticamente na primeira instalacao (valor aleatorio e longo) e
 # guardadas pelo portal; nunca aparecem na tela. Use para chaves de sessao/JWT da aplicacao.
 segredos = []  # ex.: ["JWT_SECRET", "SESSION_SECRET"]

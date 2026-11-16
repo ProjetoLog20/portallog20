@@ -118,6 +118,9 @@ class Solucao:
     # requer = "supabase": a solucao so entra no catalogo quando alguma outra usa o Supabase do
     # servidor ([supabase] no manifesto) ou com PORTAL_SUPABASE=sim no .env (ex.: o Studio).
     requer: str = ""
+    # somente_admin = true: so administradores do portal abrem (ex.: pgAdmin, Supabase Studio, que
+    # dao acesso total aos bancos). Nao pode ser liberada para usuarios na tela Acessos.
+    somente_admin: bool = False
     # [build] variaveis_na_construcao = true: site estatico (Vite/React...). Nada le variavel quando
     # o site roda, entao TODAS as variaveis (fixas e configuracoes) vao para a construcao.
     variaveis_na_construcao: bool = False
@@ -280,6 +283,9 @@ def carregar_manifesto(caminho: Path) -> Solucao:
     if not isinstance(esquemas, list) or not all(isinstance(e, str) and re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", e) for e in esquemas):
         raise ManifestoInvalido(f"{caminho}: [backup] esquemas deve ser uma lista como [\"public\"]")
 
+    somente_admin = dados.get("somente_admin", False)
+    if not isinstance(somente_admin, bool):
+        raise ManifestoInvalido(f"{caminho}: somente_admin deve ser true ou false")
     supabase = None
     supabase_realtime = False
     if "supabase" in dados:
@@ -355,6 +361,7 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         repositorio=repositorio,
         externo=servico_externo,
         requer=str(dados.get("requer", "")).strip().lower(),
+        somente_admin=somente_admin,
         ref=ref if repositorio else "",
         subpasta=subpasta,
         caminhos_publicos=list(publicos),

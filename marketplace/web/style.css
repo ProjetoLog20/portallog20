@@ -974,3 +974,6 @@ table:not(.matriz) thead th { font-size: 11.5px; text-transform: uppercase; lett
 .item-sql:hover { background: var(--superficie-2); }
 .item-sql code { flex: 1; overflow-wrap: anywhere; }
 .item-sql small { color: var(--suave); white-space: nowrap; }
+
+/* acessos: sistema so de administradores */
+.matriz .so-admin { color: var(--suave); }

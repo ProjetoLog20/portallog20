@@ -145,6 +145,7 @@ def gerar_manifesto(d: dict, com_dockerfile: bool) -> str:
         f"responsavel = {_s(d.get('responsavel') or 'LOG20')}",
         f"tags = [{', '.join(_s(t) for t in d.get('tags', []))}]",
         *([f"tecnologia = {_s(d['tecnologia'])}"] if d.get("tecnologia") else []),
+        *(["somente_admin = true"] if d.get("somente_admin") else []),
         f"segredos = [{', '.join(_s(s) for s in d['segredos'])}]",
         f'descricao = """\n{descricao.replace(chr(92), chr(92) * 2).replace(chr(34) * 3, chr(39) * 3)}\n"""',
         "",
@@ -310,7 +311,8 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao], editando: str | 
             "volumes": volumes, "segredos": segredos, "configuracoes": configuracoes, "banco": banco, "supabase": supabase,
             "supabase_realtime": bool(supabase and d.get("supabase_realtime")),
             "dockerfile": dockerfile, "arquivos": arquivos if dockerfile else {},
-            "variaveis_na_construcao": bool(d.get("variaveis_na_construcao"))}
+            "variaveis_na_construcao": bool(d.get("variaveis_na_construcao")),
+            "somente_admin": bool(d.get("somente_admin"))}
 
 
 FIXOS = {"solucao.toml", "Dockerfile", "Dockerfile.dockerignore"}
@@ -390,6 +392,7 @@ def para_edicao(cfg: Config, sol: Solucao) -> dict:
         "supabase": dict(sol.supabase) if sol.supabase else None, "usar_supabase": bool(sol.supabase),
         "supabase_realtime": sol.supabase_realtime,
         "variaveis_na_construcao": sol.variaveis_na_construcao,
+        "somente_admin": sol.somente_admin,
         "tem_dockerfile": not df.is_file(), "dockerfile": df.read_text(encoding="utf-8") if df.is_file() else None,
         "arquivos": auxiliares,
     }

@@ -206,6 +206,7 @@ function confirmar({ titulo, texto, botao, perigo = false }) {
 
 /** Lista de sistemas com caixas de marcar; devolve {el, marcados()}. */
 function escolhaSistemas(solucoes, marcados = new Set(), nome = "solucoes") {
+  solucoes = solucoes.filter((s) => !s.somente_admin);  // só administradores: não se libera
   const el = h("div", { class: "escolha-sistemas" },
     solucoes.length
       ? solucoes.map((s) => h("label", { class: "escolha" },
@@ -961,6 +962,11 @@ function mostrarAba(k) {
 
 async function carregarPessoas(sol) {
   const alvo = document.getElementById("pessoas-solucao");
+  if (sol.somente_admin) {
+    alvo.replaceChildren(h("p", { class: "numero-grande" }, "Só", h("span", {}, "administradores")),
+      h("p", { class: "nota" }, "Este sistema dá acesso total a bancos de dados: só os administradores do portal abrem. Não pode ser liberado em Acessos."));
+    return;
+  }
   try {
     const { usuarios } = await api("/api/usuarios");
     const comAcesso = usuarios.filter((u) => u.ativo && u.perfil !== "admin" && u.solucoes.includes(sol.id));
@@ -1535,7 +1541,10 @@ async function telaAcessos() {
 }
 
 async function pintarMatriz() {
-  const { usuarios, solucoes } = await carregarUsuarios();
+  const dados = await carregarUsuarios();
+  const usuarios = dados.usuarios;
+  // Os sistemas só de administradores vão para o fim (não têm o que marcar).
+  const solucoes = [...dados.solucoes].sort((a, b) => (a.somente_admin === true) - (b.somente_admin === true));
   const alvo = document.getElementById("acessos-corpo");
   if (!alvo) return;
   if (!solucoes.length) {
@@ -1559,6 +1568,7 @@ async function pintarMatriz() {
   };
   const atualizarContadores = () => {
     for (const s of solucoes) {
+      if (s.somente_admin) continue;
       const n = usuarios.filter((u) => u.ativo && u.perfil !== "admin" && u.solucoes.includes(s.id)).length;
       contadores.get(s.id).textContent = plural(n, "pessoa", "pessoas");
     }
@@ -1596,6 +1606,8 @@ async function pintarMatriz() {
         h("div", {}, h("span", { class: "pessoa-nome" }, u.nome), h("div", { class: "sub" }, u.usuario)))),
       solucoes.map((s) => h("td", { class: "celula" }, u.perfil === "admin"
         ? h("span", { class: "sempre", title: "Administradores acessam todos os sistemas" }, "Todos")
+        : s.somente_admin
+        ? h("span", { class: "so-admin", title: "Só administradores do portal abrem este sistema" }, "—")
         : h("input", {
             type: "checkbox", class: "marca-acesso", checked: u.solucoes.includes(s.id),
             "aria-label": `${s.nome} para ${u.nome}`,
@@ -1607,6 +1619,11 @@ async function pintarMatriz() {
   const cabecalho = h("tr", {}, h("th", { class: "canto" }, "Pessoa"), solucoes.map((s) => {
     const cont = h("small", {});
     contadores.set(s.id, cont);
+    if (s.somente_admin) {
+      return h("th", { class: "col-sistema", scope: "col" },
+        h("div", { class: "col-sistema-topo" }, logoSistema(s, "mini"), h("span", {}, s.nome)),
+        h("small", {}, "Só administradores"));
+    }
     return h("th", { class: "col-sistema", scope: "col" },
       h("div", { class: "col-sistema-topo" }, logoSistema(s, "mini"), h("span", {}, s.nome)),
       cont,
@@ -1618,7 +1635,8 @@ async function pintarMatriz() {
   alvo.replaceChildren(
     h("div", { class: "barra-ferramentas" }, busca, inativos),
     h("div", { class: "painel tabela-rolagem matriz-caixa" }, h("table", { class: "matriz" }, h("thead", {}, cabecalho), corpo)),
-    h("p", { class: "nota" }, "“Liberar todos” e “Retirar todos” valem para as pessoas ativas que aparecem na lista, respeitando a busca."));
+    h("p", { class: "nota" }, "“Liberar todos” e “Retirar todos” valem para as pessoas ativas que aparecem na lista, respeitando a busca."
+      + (solucoes.some((s) => s.somente_admin) ? " Sistemas marcados “Só administradores” dão acesso total a bancos de dados: abrem só para administradores do portal e não podem ser liberados aqui." : "")));
   atualizarContadores();
   pintarLinhas();
 }
@@ -1879,6 +1897,10 @@ function formularioSolucao(v, { modo, aoSalvar }) {
     usarBanco,
     usarSupabase,
     h("label", { class: "campo-check" },
+      h("input", { type: "checkbox", id: "ns-somente-admin", checked: !!v.somente_admin }),
+      h("span", {}, h("strong", {}, "Só administradores"),
+        h("small", {}, " Só os administradores do portal abrem este sistema; ele não aparece para liberar em Acessos. Para painéis com acesso total a bancos ou ao servidor."))),
+    h("label", { class: "campo-check" },
       h("input", { type: "checkbox", id: "ns-construcao", checked: !!v.variaveis_na_construcao }),
       h("span", {}, h("strong", {}, "Site estático: todas as variáveis entram na construção"),
         h("small", {}, " Para sites Vite, React ou Vue, nada lê variável quando o site está no ar, então as variáveis fixas e todas as configurações vão para o build (momento da criação). Sempre que alterar um valor, clique em Atualizar."))),
@@ -1928,6 +1950,7 @@ function formularioSolucao(v, { modo, aoSalvar }) {
       dockerfile: dockerfile ? dockerfile.value : null,
       arquivos,
       variaveis_na_construcao: !!form.querySelector("#ns-construcao")?.checked,
+      somente_admin: !!form.querySelector("#ns-somente-admin")?.checked,
     };
     try { await aoSalvar(dados); } catch (e) { erro.textContent = e.message; erro.hidden = false; botao.disabled = false; }
   });
