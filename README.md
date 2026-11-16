@@ -171,7 +171,7 @@ use `http://<ip>:9101` como endereço público. As portas 8101/8102 ficam só em
 | `PORTAL_URL_BASE` | `http://localhost` | Endereço do servidor; cada solução fica em `<base>:<porta>` |
 | `PORTAL_BIND_SOLUCOES` | `127.0.0.1` | `0.0.0.0` publica as soluções na rede |
 | `PORTAL_HOST` / `PORTAL_PORTA` | `127.0.0.1` / `8000` | Onde o portal escuta |
-| `PORTAL_SESSAO_HORAS` | `12` | Duração do login |
+| `PORTAL_SESSAO_HORAS` | `12` | Horas sem uso até o login vencer (cada uso renova; no máximo 30 dias desde o login) |
 | `PORTAL_COOKIE_SEGURO` | `false` | `true` quando houver HTTPS |
 | `PORTAL_URL_PUBLICA` | `http://localhost:8000` | Endereço do portal, para onde o proxy manda quem não está logado |
 | `PORTAL_COOKIE_DOMINIO` | | Ex.: `.log20.com.br`, para a sessão valer nos subdomínios |
@@ -261,7 +261,8 @@ sistema**: banco (PostgreSQL 17 do Supabase), login, API de dados, arquivos e o 
 containers `log20-sb-<id>-*` numa rede só dele. Banco, usuários e arquivos de um sistema não se
 misturam com os de outro, e o código do sistema não muda. As versões das imagens e os arquivos de
 `deploy/supabase/volumes` são os do compose oficial (commit em `deploy/supabase/ORIGEM-COMMIT`),
-sem realtime, edge functions, logs e pooler.
+sem edge functions, logs e pooler. O **Realtime** (telas que atualizam sozinhas) é opcional, por
+sistema.
 
 **Ligar:** no manifesto, a seção `[supabase]` (o assistente "Nova solução" põe sozinho quando o
 projeto usa `@supabase/supabase-js`):
@@ -272,7 +273,13 @@ url = "VITE_SUPABASE_URL"            # recebe o endereço do sistema
 chave_anon = "VITE_SUPABASE_ANON_KEY" # recebe a chave pública
 # chave_servico = "SUPABASE_SERVICE_ROLE_KEY"  # só para código que roda no servidor
 # url_interna = "SUPABASE_URL"                 # idem: endereço na rede interna (sem login do portal)
+# realtime = true   # servico de tempo real (supabase-js .channel()); cerca de 200 MB a mais
 ```
+
+Com `realtime = true` (o assistente marca quando acha `.channel(` ou `postgres_changes` no código),
+o portal cria também `log20-sb-<id>-realtime`, em `/realtime/v1` no mesmo endereço do sistema.
+Tirar a linha e reiniciar remove o container. **Edge Functions** não existem no Supabase do
+servidor (o assistente avisa).
 
 No primeiro **Iniciar**, o portal gera os segredos (em `dados/supabase/<id>.json`, nunca mais
 trocados), baixa as imagens (alguns minutos), sobe a pilha e preenche as variáveis; a pilha usa de
@@ -282,15 +289,21 @@ Supabase dela).
 
 | Onde | O quê | Acesso |
 | --- | --- | --- |
-| **Mesmo endereço do sistema** (`/rest/v1`, `/auth/v1`, `/storage/v1`) | API que o site usa | Login do portal e liberação do sistema em **Acessos** (como o próprio sistema); depois, as chaves e as regras (RLS) do Supabase. Sem porta extra e sem CORS. |
+| **Mesmo endereço do sistema** (`/rest/v1`, `/auth/v1`, `/storage/v1`, `/realtime/v1`) | API que o site usa | Login do portal e liberação do sistema em **Acessos** (como o próprio sistema); depois, as chaves e as regras (RLS) do Supabase. Sem porta extra e sem CORS. |
 | **8112** | **Supabase Studio** (painel; um só no servidor) | Login do portal + liberação em **Acessos**. Mostra um sistema de cada vez: em **Gerenciar**, o botão **Abrir o Studio** aponta o painel para o sistema. Dá acesso total ao banco: só administradores. |
 
 **Troca de IP:** o endereço vai gravado no site na construção. O portal guarda com que valores
 construiu a imagem; no próximo Iniciar (o `atualizar.sh` reinicia tudo quando o IP muda), se o
 endereço mudou, ele reconstrói o site e recria os containers do Supabase com o endereço novo.
 
-Login sem e-mail: cadastro ligado com confirmação automática (o Panorama cria usuários pela tela
-dele); `SUPABASE_SMTP_*` no `.env` liga o envio de e-mail para todos. Linha de comando:
+**Login e e-mail** (Gerenciar → Supabase da solução → **Login e e-mail**): servidor de e-mail
+(SMTP) próprio do sistema, com **Testar conexão** (confere servidor, usuário e senha sem enviar
+nada), e **Cadastro aberto/fechado**. Em branco, vale o `SUPABASE_SMTP_*` do `.env` (igual para
+todos); sem nenhum, as contas novas são confirmadas automaticamente e "esqueci a senha" não envia
+nada. O cadastro fica **aberto** por padrão: o Panorama cria os usuários dele pelo próprio cadastro
+(tela de Administração) e, fechado, essa tela para de funcionar; só quem entrou no portal e tem o
+sistema liberado chega ao login dele. Fica em `dados/supabase/<id>.login.json` (só root); salvar
+recria só o container do login. Linha de comando:
 `python -m marketplace supabase listar|conferir|subir|parar [ids]`.
 
 **Copiar dados de outro Supabase** (ex.: o da nuvem): em **Gerenciar → Visão geral**, botão
@@ -305,11 +318,23 @@ porta, usuário `postgres.<id do projeto>`) e a senha do banco, e marque o que c
 - **Arquivos**: baixados da origem pela API dela (precisa da chave de serviço da origem) e enviados
   para o Supabase local.
 
-O que vem **substitui** o que estiver no local; antes, o portal guarda uma cópia completa do banco
-local em `<pasta de backups>/supabase/<id>/antes-de-copiar-*.dump` (ficam as 3 últimas). A senha e
+O que vem **substitui** o que estiver no local; antes, o portal faz um **backup isolado** do sistema
+(banco, usuários, arquivos e chaves do Supabase; na tela Backups, "Segurança, antes de importar"),
+mesmo que ele esteja fora do backup diário. **Desfazer a última importação** (mesma tela) volta o
+Supabase a esse backup, com outro backup de segurança antes; a limpeza automática nunca apaga o
+backup da última importação. (Até 16/11 a cópia de segurança era só o banco, em
+`<pasta de backups>/supabase/<id>/antes-de-copiar-*.dump`; essas ficam lá, sem botão.) A senha e
 a chave da origem só passam pela memória: não são gravadas nem aparecem no log. Tudo roda dentro do
 container do banco local, que já tem o `pg_dump`/`psql` da mesma versão. Pode repetir quando quiser
 (ex.: para trazer os dados mais novos antes de desligar a nuvem).
+
+**Criar a estrutura pelos arquivos .sql** (mesma tela), para sistemas que nunca tiveram um
+Supabase de origem: só com o banco vazio (nenhuma tabela em `public`). O portal lista os `.sql` de
+`supabase/migrations`, `migrations`, `sql`, `database`, `db` e `supabase` do código da última
+instalação, na ordem sugerida (`schema*` primeiro, depois pela numeração, `seed*` por último);
+o administrador desmarca o que não deve rodar. Cada arquivo roda numa transação, como `postgres`;
+no primeiro erro, para e mostra o arquivo (os anteriores ficam). Antes, o mesmo backup isolado da
+importação (dá para desfazer).
 
 **Backup:** o Supabase de cada sistema entra no backup diário (ver "Backup e restauração").
 

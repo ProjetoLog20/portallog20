@@ -253,7 +253,8 @@ def cmd_supabase(args: argparse.Namespace) -> int:
         elif args.acao == "subir":
             print(f"\n==> Supabase de {sid}")
             try:
-                sb.garantir(sid, ger.url(sol), cfg.pasta_dados, cfg.rede_docker, lambda t: print(f"  {t}", flush=True))
+                sb.garantir(sid, ger.url(sol), cfg.pasta_dados, cfg.rede_docker, lambda t: print(f"  {t}", flush=True),
+                            realtime=sol.supabase_realtime)
             except (sb.ErroSupabase, docker_cli.DockerError) as exc:
                 print(f"ERRO: {exc}", file=sys.stderr)
                 falhas += 1

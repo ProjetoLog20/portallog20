@@ -58,7 +58,7 @@ PORTAL_POSTGRES_SENHA=
 # Backup automatico antes de cada deploy/atualizar.sh (nao recomendado desligar):
 # PORTAL_BACKUP_ANTES_DE_ATUALIZAR=sim
 
-# Duracao da sessao de login, em horas.
+# Login vence depois de tantas horas SEM USO (usar o portal ou um sistema renova; maximo 30 dias).
 PORTAL_SESSAO_HORAS=12
 
 # ---- So com HTTPS e dominios proprios (veja deploy/Caddyfile.exemplo) ----

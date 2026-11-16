@@ -683,8 +683,184 @@ function blocoSupabaseDetalhe(sol) {
     est?.criado && !est.no_ar ? h("p", { class: "nota" }, "Fora do ar. Tente Reiniciar a solução.") : null,
     h("p", { class: "nota" }, "Os dados ficam no servidor. Reiniciar, atualizar ou remover o container não os apaga."),
     est?.no_ar ? h("div", { class: "linha-botoes topo-8" }, botaoStudio,
-      h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoCopiarSupabase(sol) }, "Importar dados de outra base (Supabase)")) : null,
-    sb.studio && !est?.no_ar ? h("p", { class: "nota" }, "O Studio (painel de administração do banco) abre quando o Supabase estiver no ar.") : null);
+      h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoCopiarSupabase(sol) }, "Importar dados de outra base (Supabase)"),
+      h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoEstruturaSupabase(sol) }, "Criar a estrutura pelos arquivos .sql"),
+      sb.importacao?.existe ? h("button", { type: "button", class: "botao pequeno perigo", onclick: () => dialogoDesfazerImportacao(sol) },
+        "Desfazer a última importação") : null) : null,
+    sb.importacao?.existe ? h("p", { class: "nota" }, `Última importação: ${dataIso(sb.importacao.em.replace(" ", "T"))}, de ${sb.importacao.origem}.`) : null,
+    sb.studio && !est?.no_ar ? h("p", { class: "nota" }, "O Studio (painel de administração do banco) abre quando o Supabase estiver no ar.") : null,
+    blocoLoginSupabase(sol));
+}
+
+/** Projeto sem Supabase de origem: cria as tabelas pelos .sql do repositório (banco vazio). */
+async function dialogoEstruturaSupabase(sol) {
+  const corpo = h("div", {}, h("p", { class: "nota" }, h("span", { class: "girando", "aria-hidden": "true" }), " Procurando os arquivos .sql…"));
+  const rodape = h("div", { class: "linha-botoes" });
+  const fechar = h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Fechar");
+  rodape.replaceChildren(fechar);
+  const dlg = dialogo({ titulo: "Criar a estrutura pelos arquivos .sql", descricao: sol.nome, corpo, rodape, largo: true });
+  dlg.addEventListener("close", () => telaSolucao(sol.id), { once: true });
+  let d;
+  try { d = await api(`/api/solucoes/${sol.id}/supabase/estrutura`); } catch (e) {
+    corpo.replaceChildren(h("p", { class: "form-erro" }, e.message)); return;
+  }
+  if (d.execucao?.estado === "executando") { acompanhar(); return; }
+  if (d.tabelas > 0) {
+    corpo.replaceChildren(h("p", { class: "dialogo-texto" }, `O banco deste sistema já tem ${plural(d.tabelas, "tabela", "tabelas")}. `
+      + "A criação pelos arquivos .sql só roda num banco vazio. Para trazer dados de outro Supabase, use \"Importar dados de outra base\"."),
+      d.execucao ? h("details", { class: "avancado" }, h("summary", {}, "Última execução"), h("pre", { class: "saida curta" }, d.execucao.log)) : null);
+    return;
+  }
+  if (!d.arquivos.length) {
+    corpo.replaceChildren(h("p", { class: "dialogo-texto" }, "Nenhum arquivo .sql encontrado nas pastas supabase/migrations, migrations, sql, database, db ou supabase do repositório."));
+    return;
+  }
+  const marcas = d.arquivos.map((a) => h("label", { class: "item-sql" },
+    h("input", { type: "checkbox", value: a.caminho, checked: true }), h("code", {}, a.caminho), h("small", {}, tamanho(a.bytes))));
+  const conf = h("input", { type: "text", id: "es-conf", autocomplete: "off", spellcheck: false });
+  const erro = h("p", { class: "form-erro", role: "alert", hidden: true });
+  const contagem = h("strong", {});
+  const atualizar = () => {
+    const n = marcas.filter((m) => m.querySelector("input").checked).length;
+    contagem.textContent = plural(n, "arquivo marcado", "arquivos marcados");
+    botao.disabled = !n || conf.value.trim() !== sol.id;
+  };
+  const botao = h("button", { type: "button", class: "botao primario", disabled: true, onclick: async () => {
+    botao.disabled = true;
+    try {
+      await api(`/api/solucoes/${sol.id}/supabase/estrutura`, { method: "POST", body: {
+        arquivos: marcas.map((m) => m.querySelector("input")).filter((i) => i.checked).map((i) => i.value), confirmacao: conf.value.trim() } });
+      acompanhar();
+    } catch (e) { erro.textContent = e.message; erro.hidden = false; botao.disabled = false; }
+  } }, "Criar a estrutura");
+  for (const m of marcas) m.querySelector("input").addEventListener("change", atualizar);
+  conf.addEventListener("input", atualizar);
+  corpo.replaceChildren(
+    h("p", { class: "dialogo-texto" }, "O banco está vazio. Os arquivos marcados rodam nesta ordem, cada um numa transação. No primeiro erro, para e mostra o arquivo; os anteriores ficam aplicados. Antes, o portal faz um backup do Supabase deste sistema."),
+    h("p", { class: "nota" }, "Confira a ordem: a sugerida é schema* primeiro, depois os outros pela numeração, seed* por último. Desmarque o que não deve rodar (por exemplo, migrações que o schema.sql já inclui). Código da última instalação ou atualização."),
+    h("div", { class: "lista-sql" }, marcas),
+    h("p", { class: "nota" }, contagem),
+    h("div", { class: "campo" }, h("label", { for: "es-conf" }, `Para confirmar, digite ${sol.id}`), conf),
+    erro);
+  rodape.replaceChildren(fechar, botao);
+  atualizar();
+
+  function acompanhar() {
+    const etapa = h("p", { class: "etapa-copia" }, "Iniciando…");
+    const pre = h("pre", { class: "saida curta", tabindex: "0" }, "");
+    const fim = h("div", {});
+    corpo.replaceChildren(etapa, pre, fim);
+    rodape.replaceChildren(fechar);
+    const passo = async () => {
+      if (!dlg.isConnected) return;
+      let c;
+      try { c = (await api(`/api/solucoes/${sol.id}/supabase/estrutura/situacao`)).execucao; } catch { setTimeout(passo, 3000); return; }
+      if (!c) return;
+      pre.textContent = c.log;
+      pre.scrollTop = pre.scrollHeight;
+      if (c.estado === "executando") {
+        etapa.replaceChildren(h("span", { class: "girando", "aria-hidden": "true" }), ` ${c.etapa || "Trabalhando nisso"}… Essa janela pode ser fechada, continua mesmo assim.`);
+        setTimeout(passo, 2000);
+        return;
+      }
+      etapa.replaceChildren(pilula(c.estado === "falhou" ? "com_problema" : "rodando", c.estado === "falhou" ? "Falhou" : "Concluída"),
+        c.estado !== "falhou" ? ` ${plural(c.resumo.aplicados, "arquivo aplicado", "arquivos aplicados")}, ${plural(c.resumo.tabelas, "tabela", "tabelas")}.` : "");
+      fim.replaceChildren(c.erro ? h("p", { class: "form-erro" }, c.erro) : null,
+        c.resumo?.seguranca ? h("p", { class: "nota" }, `Backup de antes: ${c.resumo.seguranca}. Para voltar a ele, use "Desfazer a última importação".`) : null);
+    };
+    passo();
+  }
+}
+
+/** Volta o Supabase ao backup feito antes da última importação. */
+function dialogoDesfazerImportacao(sol) {
+  const imp = sol.supabase.importacao;
+  const conf = h("input", { type: "text", id: "dz-conf", autocomplete: "off", spellcheck: false });
+  const erro = h("p", { class: "form-erro", role: "alert", hidden: true });
+  const botao = h("button", { type: "button", class: "botao perigo-cheio", disabled: true, onclick: async () => {
+    botao.disabled = true;
+    try {
+      await api(`/api/solucoes/${sol.id}/supabase/desfazer`, { method: "POST", body: { confirmacao: conf.value.trim() } });
+      dlg.close();
+      toast("Desfazendo a importação. Acompanhe em Backups.");
+      location.hash = "#/admin/backups";
+    } catch (e) { erro.textContent = e.message; erro.hidden = false; botao.disabled = false; }
+  } }, "Desfazer a importação");
+  conf.addEventListener("input", () => { botao.disabled = conf.value.trim() !== sol.id; });
+  const dlg = dialogo({
+    titulo: "Desfazer a última importação?",
+    descricao: sol.nome,
+    corpo: [
+      h("p", { class: "dialogo-texto" }, `O Supabase deste sistema volta ao estado de antes da última importação (${dataIso(imp.em.replace(" ", "T"))}, de ${imp.origem}): banco, usuários do login, arquivos e chaves.`),
+      h("p", { class: "dialogo-texto" }, "Tudo o que foi gravado no sistema depois da importação se perde. Antes, o portal faz outro backup de segurança (dá para voltar a ele em Backups)."),
+      h("div", { class: "campo" }, h("label", { for: "dz-conf" }, `Para confirmar, digite ${sol.id}`), conf),
+      erro,
+    ],
+    rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), botao],
+  });
+}
+
+/** E-mail do login (convite, confirmação, esqueci a senha) e cadastro aberto ou fechado. */
+function blocoLoginSupabase(sol) {
+  const lg = sol.supabase.login;
+  if (!lg) return null;
+  const origem = { sistema: "e-mail próprio deste sistema", servidor: `e-mail do servidor (${lg.servidor_global})`,
+    nenhum: "nenhum: sem e-mail, as contas novas são confirmadas automaticamente e \"esqueci a senha\" não envia nada" }[lg.origem_smtp];
+  const resumo = h("p", { class: "nota" }, `Envio de e-mail: ${origem}. Cadastro ${lg.cadastro_aberto ? "aberto" : "fechado"}.`);
+  return h("details", { class: "avancado topo-8" }, h("summary", {}, "Login e e-mail"), resumo,
+    h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoLoginSupabase(sol) }, "Configurar login e e-mail"));
+}
+
+function dialogoLoginSupabase(sol) {
+  const lg = sol.supabase.login;
+  const campo = (id, rotulo, valor, extra = {}, ajuda = "") => h("div", { class: "campo" },
+    h("label", { for: id }, rotulo), h("input", { id, type: "text", value: valor ?? "", autocomplete: "off", spellcheck: false, ...extra }),
+    ajuda ? h("small", {}, ajuda) : null);
+  const aberto = h("input", { type: "checkbox", id: "lg-cadastro", checked: lg.cadastro_aberto });
+  const erro = h("p", { class: "form-erro", role: "alert", hidden: true });
+  const ok = h("p", { class: "nota", role: "status", hidden: true });
+  const form = h("form", { id: "form-login-sb", class: "config" },
+    h("p", { class: "nota acima" }, "E-mail usado pelo login do sistema para convites, confirmação de conta e \"esqueci a senha\". "
+      + (lg.servidor_global ? `Em branco, usa o do servidor (${lg.servidor_global}).` : "Em branco, o sistema não envia e-mails.")),
+    h("div", { class: "form-grade" },
+      campo("lg-servidor", "Servidor de e-mail (SMTP)", lg.smtp_servidor, { placeholder: "smtp.office365.com" }),
+      campo("lg-porta", "Porta", lg.smtp_porta || "587", { type: "number" }, "587 (STARTTLS) ou 465 (SSL)."),
+      campo("lg-usuario", "Usuário", lg.smtp_usuario)),
+    h("div", { class: "form-grade" },
+      campo("lg-senha", "Senha", "", { type: "password", autocomplete: "new-password", placeholder: lg.tem_senha ? "•••••••• (guardada)" : "" },
+        lg.tem_senha ? "Em branco mantém a senha guardada." : ""),
+      campo("lg-remetente", "E-mail do remetente", lg.smtp_remetente, { inputmode: "email", placeholder: "nao-responda@log20.com.br" }),
+      campo("lg-nome", "Nome do remetente", lg.smtp_nome, { placeholder: "Portal LOG20" })),
+    h("label", { class: "campo-check" }, aberto,
+      h("span", {}, h("strong", {}, "Cadastro aberto"),
+        h("small", {}, " Permite criar contas pelo próprio sistema. O Panorama cria os usuários dele assim (tela de Administração): "
+          + "fechado, essa tela deixa de funcionar. Só quem entrou no portal e tem acesso ao sistema chega ao login dele."))),
+    erro, ok);
+  const valores = () => ({ smtp_servidor: form.querySelector("#lg-servidor").value.trim(), smtp_porta: form.querySelector("#lg-porta").value.trim(),
+    smtp_usuario: form.querySelector("#lg-usuario").value.trim(), smtp_senha: form.querySelector("#lg-senha").value,
+    smtp_remetente: form.querySelector("#lg-remetente").value.trim(), smtp_nome: form.querySelector("#lg-nome").value.trim(),
+    cadastro_aberto: aberto.checked });
+  const testar = h("button", { type: "button", class: "botao", onclick: async () => {
+    testar.disabled = true; erro.hidden = true; ok.hidden = true;
+    try {
+      const r = await api(`/api/solucoes/${sol.id}/supabase/login/testar`, { method: "POST", body: { dados: valores() } });
+      ok.textContent = r.mensagem; ok.hidden = false;
+    } catch (e) { erro.textContent = e.message; erro.hidden = false; }
+    testar.disabled = false;
+  } }, "Testar conexão");
+  const salvar = h("button", { type: "submit", class: "botao primario", form: "form-login-sb" }, "Salvar");
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    salvar.disabled = true; erro.hidden = true; ok.hidden = true;
+    try {
+      const r = await api(`/api/solucoes/${sol.id}/supabase/login`, { method: "PUT", body: { dados: valores() } });
+      dlg.close();
+      toast(r.aplicado ? "Login e e-mail salvos e aplicados." : "Salvo. Vale a partir do próximo início do sistema.");
+      telaSolucao(sol.id);
+    } catch (e) { erro.textContent = e.message; erro.hidden = false; salvar.disabled = false; }
+  });
+  const dlg = dialogo({ titulo: "Login e e-mail", descricao: sol.nome, corpo: form, largo: true,
+    rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), testar, salvar] });
 }
 
 /** Copiar tabelas, usuários, regras e arquivos de outro Supabase (ex.: o da nuvem). */
@@ -704,7 +880,7 @@ async function dialogoCopiarSupabase(sol) {
     campo("cp-url", "Endereço do projeto de origem", { type: "text", placeholder: "https://<id>.supabase.co" }, "Em branco: obtido do usuário (postgres.<id>)."),
     campo("cp-chave", "Chave de serviço da origem", { type: "password" }, "Project Settings → API Keys: service_role (ou secret)."));
   const form = h("form", { id: "form-copiar", class: "config" },
-    h("p", { class: "nota acima" }, "O que for importado irá substituir o que estiver no banco desta solução. Antes da substituição, o portal guarda uma cópia de segurança dos dados na pasta de backups."),
+    h("p", { class: "nota acima" }, "O que for importado irá substituir o que estiver no banco desta solução. Antes, o portal faz um backup do Supabase deste sistema (banco, usuários, arquivos e chaves): se algo der errado, use \"Desfazer a última importação\"."),
     h("div", { class: "form-grade" },
       campo("cp-host", "Servidor", { type: "text", required: true, placeholder: "aws-1-sa-east-1.pooler.supabase.com" }),
       campo("cp-porta", "Porta", { type: "number", value: "5432", required: true }),
@@ -768,7 +944,9 @@ async function dialogoCopiarSupabase(sol) {
         c.erro ? h("p", { class: "form-erro" }, c.erro) : null,
         c.avisos?.length ? h("details", { class: "avancado" }, h("summary", {}, `Avisos (${c.avisos.length})`),
           h("ul", { class: "lista-explica" }, c.avisos.map((a) => h("li", {}, a)))) : null,
-        c.estado !== "falhou" ? h("p", { class: "nota" }, "Abra o sistema e entre com um usuário válido. Se algum problema ocorrer, clique em Reiniciar na solução.") : null);
+        c.estado !== "falhou" ? h("p", { class: "nota" }, "Abra o sistema e entre com um usuário válido. Se algum problema ocorrer, clique em Reiniciar na solução.") : null,
+        c.resumo?.seguranca ? h("p", { class: "nota" }, `Backup de antes da importação: ${c.resumo.seguranca}. Para voltar a ele, feche esta janela e use "Desfazer a última importação".`) : null);
+      if (dlg.isConnected) dlg.addEventListener("close", () => telaSolucao(sol.id), { once: true });
     };
     passo();
   }
@@ -1591,7 +1769,7 @@ function valoresDaAnalise(an) {
     ambiente: { ...an.ambiente }, volumes: { ...an.volumes }, segredos: [...an.segredos],
     configuracoes: an.configuracoes.map((c) => ({ ...c, incluir: true })),
     banco: an.banco, usar_banco: !!an.banco,
-    supabase: an.supabase, usar_supabase: !!an.supabase,
+    supabase: an.supabase, usar_supabase: !!an.supabase, supabase_realtime: !!an.supabase_realtime,
     tem_dockerfile: an.tem_dockerfile, dockerfile: an.dockerfile, arquivos: { ...(an.arquivos || {}) },
     variaveis_na_construcao: an.tecnologia === "spa",
   };
@@ -1680,7 +1858,11 @@ function formularioSolucao(v, { modo, aoSalvar }) {
     h("div", { class: "form-grade" },
       campoSb("url", "Variável do endereço", "Recebe o endereço do sistema (ex.: VITE_SUPABASE_URL)."),
       campoSb("chave_anon", "Variável da chave pública", "Recebe a chave anon (ex.: VITE_SUPABASE_ANON_KEY)."),
-      campoSb("chave_servico", "Chave de serviço (opcional)", "Só para código que roda no servidor. Nunca deve ser usada em um site estático.")))
+      campoSb("chave_servico", "Chave de serviço (opcional)", "Só para código que roda no servidor. Nunca deve ser usada em um site estático.")),
+    h("label", { class: "campo-check" },
+      h("input", { type: "checkbox", id: "ns-sb-realtime", checked: !!v.supabase_realtime }),
+      h("span", {}, h("strong", {}, "Tempo real (Realtime)"),
+        h("small", {}, " Para telas que atualizam sozinhas (supabase-js .channel()). Usa cerca de 200 MB de memória a mais."))))
     : null;
 
   const form = h("form", { class: "config", id: "ns-form" },
@@ -1738,6 +1920,7 @@ function formularioSolucao(v, { modo, aoSalvar }) {
       configuracoes: tabela.valores().filter((c) => usar || !doBanco.includes(c.nome)),
       banco: v.banco, usar_banco: usar,
       usar_supabase: !!form.querySelector("#ns-supabase")?.checked,
+      supabase_realtime: !!form.querySelector("#ns-sb-realtime")?.checked,
       supabase: form.querySelector("#ns-supabase") ? {
         url: form.querySelector("#ns-sb-url").value.trim(), chave_anon: form.querySelector("#ns-sb-chave_anon").value.trim(),
         chave_servico: form.querySelector("#ns-sb-chave_servico").value.trim(), url_interna: sbv.url_interna || "",

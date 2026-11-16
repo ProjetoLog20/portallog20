@@ -2,8 +2,9 @@
 
 Tela: Gerenciar > Visao geral > "Copiar dados de outro Supabase". Partes, nesta ordem:
 
-1. **seguranca**: copia completa do banco local (pg_dump) em <backups>/supabase/<id>/, antes de
-   mexer em qualquer coisa (as 3 ultimas ficam);
+1. **seguranca**: backup isolado da solucao (tela Backups, "Antes de importar"), com banco,
+   usuarios, arquivos e chaves do Supabase, antes de mexer em qualquer coisa. E dele que sai o
+   "Desfazer a ultima importacao" (registrado em dados/supabase/<id>.importacao.json);
 2. **tabelas** (esquema public): o public local e apagado e recriado com o mesmo dono e as mesmas
    permissoes de antes; o da origem entra por pg_dump/pg_restore (tabelas, dados, funcoes,
    gatilhos, regras RLS, permissoes);
@@ -44,7 +45,6 @@ USUARIO_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,62}$")
 BANCO_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{0,62}$")
 URL_RE = re.compile(r"^https?://[A-Za-z0-9.-]+(:\d+)?/?$")
 ARQ = "/tmp/log20-copia"  # pasta de trabalho dentro do container do banco
-MANTER_SEGURANCA = 3
 # Erros do pg_restore que nao atrapalham (o Supabase local ja tem o que eles tentam criar).
 ERROS_ESPERADOS = (
     'schema "public" already exists',
@@ -157,15 +157,29 @@ def situacao(sid: str) -> dict | None:
     return c.como_dict() if c else None
 
 
+def arquivo_importacao(pasta_dados: Path, sid: str) -> Path:
+    return pasta_dados / "supabase" / f"{sid}.importacao.json"
+
+
+def ultima_importacao(pasta_dados: Path, sid: str) -> dict | None:
+    """{'backup', 'em', 'origem', 'partes'} da ultima importacao que comecou a alterar o banco."""
+    arq = arquivo_importacao(pasta_dados, sid)
+    try:
+        return json.loads(arq.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def iniciar(sid: str, nome: str, origem: Origem, partes: dict[str, bool], pasta_dados: Path, pasta_backup: Path,
-            antes: Callable[[], None] | None = None) -> Copia:
+            seguranca: Callable[[Callable[[str], None]], str]) -> Copia:
+    """`seguranca(registrar)` faz o backup da solucao antes de mexer e devolve o nome dele."""
     with _trava:
         atual = _copias.get(sid)
         if atual and atual.estado == "executando":
             raise ErroCopia("Já existe uma cópia em andamento para este sistema.")
         copia = Copia(sid)
         _copias[sid] = copia
-    threading.Thread(target=_rodar, args=(copia, nome, origem, partes, pasta_dados, pasta_backup, antes),
+    threading.Thread(target=_rodar, args=(copia, nome, origem, partes, pasta_dados, pasta_backup, seguranca),
                      daemon=True, name=f"copia-supabase-{sid}").start()
     return copia
 
@@ -381,7 +395,7 @@ select pg_get_triggerdef(t.oid) || ';'
 
 
 def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_dados: Path, pasta_backup: Path,
-           antes: Callable[[], None] | None) -> None:
+           seguranca: Callable[[Callable[[str], None]], str]) -> None:
     try:
         seg = sb.segredos(pasta_dados, c.sid, criar=False)
         if seg is None or not sb.gateway_no_ar(c.sid):
@@ -403,19 +417,19 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
         if int(versao.split(".")[0]) > 17:
             raise ErroCopia(f"A origem usa PostgreSQL {versao}, mais novo que o do Supabase local (17).")
 
-        c.etapa = "Copiando o banco local antes (segurança)"
-        destino = pasta_backup / "supabase" / c.sid
-        destino.mkdir(parents=True, exist_ok=True)
-        arq_seg = destino / f"antes-de-copiar-{time.strftime('%Y-%m-%d_%H%M%S')}.dump"
-        env = banco.local_env("supabase_admin")
-        docker_cli.para_arquivo(["exec", *[a for n in env for a in ("-e", n)], banco.container,
-                                 "pg_dump", "-Fc", "--no-owner"], arq_seg, env=env)
-        c.registrar(f"Cópia de segurança do Supabase local: {arq_seg.name} ({arq_seg.stat().st_size // 1024} KB).")
-        c.resumo["seguranca"] = str(arq_seg)
-        for velho in sorted(destino.glob("antes-de-copiar-*.dump"))[:-MANTER_SEGURANCA]:
-            velho.unlink(missing_ok=True)
-        if antes:
-            antes()
+        c.etapa = "Backup do Supabase local antes (segurança)"
+        c.registrar("Backup de segurança do sistema (banco, usuários, arquivos e chaves); o Supabase para por alguns segundos.")
+        try:
+            nome_bkp = seguranca(lambda l: c.registrar("  " + l))
+        except Exception as exc:  # noqa: BLE001 - sem backup, nada e alterado
+            raise ErroCopia(f"O backup de segurança falhou, nada foi alterado: {exc}") from exc
+        c.resumo["seguranca"] = nome_bkp
+        c.registrar(f"Backup de segurança: {nome_bkp} (tela Backups).")
+        if not sb.gateway_no_ar(c.sid):
+            raise ErroCopia("O Supabase deste sistema não voltou depois do backup. Nada foi alterado; inicie a solução e tente de novo.")
+        sb._gravar_json_privado(arquivo_importacao(pasta_dados, c.sid), {
+            "backup": nome_bkp, "em": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "origem": f"{origem.usuario}@{origem.host}", "partes": [k for k, v in partes.items() if v]})
 
         if partes["tabelas"]:
             c.etapa = "Lendo as tabelas da origem"
@@ -491,7 +505,7 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
         c.estado, c.erro = "falhou", str(exc)
         c.registrar(f"ERRO: {exc}")
         if c.resumo.get("seguranca"):
-            c.registrar(f"O Supabase local pode ter ficado incompleto. A cópia de segurança feita antes está em {Path(c.resumo['seguranca']).name} (pasta de backups, supabase/{c.sid}).")
+            c.registrar(f"O Supabase local pode ter ficado incompleto. Para voltar como estava, use \"Desfazer a última importação\" (backup {c.resumo['seguranca']}).")
         try:
             _Banco(c.sid, "", origem).local_cmd(["sh", "-c", f"rm -rf {ARQ}"])
         except Exception:  # noqa: BLE001

@@ -481,7 +481,8 @@ class Gerenciador:
         if sol.supabase:
             tarefa.etapa = "Preparando o Supabase do sistema"
             try:
-                sb.garantir(sol.id, self.url(sol), self.config.pasta_dados, self.config.rede_docker, tarefa.registrar)
+                sb.garantir(sol.id, self.url(sol), self.config.pasta_dados, self.config.rede_docker, tarefa.registrar,
+                            realtime=sol.supabase_realtime)
             except sb.ErroSupabase as exc:
                 raise docker_cli.DockerError(str(exc)) from exc
         tarefa.etapa = "Iniciando container"

@@ -57,6 +57,7 @@ class Analise:
     # Sistema feito sobre o Supabase: variaveis que o portal preenche com o Supabase proprio dele
     # ({"url": "VITE_SUPABASE_URL", "chave_anon": ..., "url_interna": "", "chave_servico": ""}).
     supabase: dict[str, str] | None = None
+    supabase_realtime: bool = False
     configuracoes: list[dict] = field(default_factory=list)
     avisos: list[Aviso] = field(default_factory=list)
     # Arquivos auxiliares do Dockerfile sugerido (nome -> conteudo), guardados com o manifesto.
@@ -899,9 +900,11 @@ def _supabase(repo: Repo, an: dict) -> None:
         "info", "Usa o Supabase: o portal cria um só para este sistema",
         f"Banco, login e arquivos ficam num Supabase próprio, no servidor, no mesmo endereço do sistema. O portal preenche {', '.join(sorted(gerenciadas)) or 'as variáveis do Supabase'} sozinho. O banco começa vazio: importe as tabelas e os dados do Supabase de origem.", sorted(gerenciadas)))
     if re.search(r"\.channel\(|\.subscribe\(\s*\)|postgres_changes", texto):
+        an["supabase_realtime"] = True
         an["avisos"].append(Aviso(
-            "atencao", "Usa Realtime do Supabase",
-            "O Supabase do servidor não tem o serviço de atualizar em tempo real: telas que atualizam sozinhas param de atualizar.", []))
+            "info", "Usa Realtime do Supabase",
+            "Telas que atualizam sozinhas usam o serviço de tempo real. O portal liga esse serviço no Supabase deste "
+            "sistema (opção \"Tempo real\" abaixo); ele usa cerca de 200 MB de memória.", []))
     if re.search(r"functions\.invoke\(", texto) or repo.existe("supabase/functions"):
         an["avisos"].append(Aviso(
             "atencao", "Usa Edge Functions do Supabase",
@@ -914,7 +917,8 @@ def analisar(pasta: Path, nome_repo: str = "") -> Analise:
     repo = Repo(pasta)
     an: dict = {"tecnologia": "desconhecida", "nome_tecnologia": "Não identificada", "evidencias": [], "suportado": True,
                 "tem_dockerfile": False, "dockerfile": None, "porta_container": 8080, "caminho_saude": "/", "comando": "",
-                "ambiente": {}, "volumes": {}, "segredos": [], "banco": None, "supabase": None, "configuracoes": [], "avisos": [],
+                "ambiente": {}, "volumes": {}, "segredos": [], "banco": None, "supabase": None, "supabase_realtime": False,
+                "configuracoes": [], "avisos": [],
                 "arquivos": {}}
     ev = an["evidencias"]
     py = "\n".join(repo.ler(a) for a in repo.com_extensao(".py")[:400])

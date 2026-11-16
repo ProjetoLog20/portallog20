@@ -446,15 +446,27 @@ class Autenticacao:
         self.limite.limpar(chave_user)
         return _usuario(row), token
 
+    # A sessao vence depois de `sessao_horas` SEM USO (cada uso empurra o prazo), e nunca passa
+    # de SESSAO_MAX_S desde o login. A renovacao grava no maximo a cada RENOVAR_A_CADA_S.
+    SESSAO_MAX_S = 30 * 24 * 3600
+    RENOVAR_A_CADA_S = 600
+
     def sessao(self, token: str | None) -> Usuario | None:
         if not token or len(token) > 200:
             return None
+        agora = time.time()
+        th = _hash_token(token)
         with self._db() as db:
             row = db.execute(
-                "SELECT u.* FROM sessoes s JOIN usuarios u ON u.id = s.usuario_id"
+                "SELECT u.*, s.criada_em AS s_criada, s.expira_em AS s_expira FROM sessoes s"
+                " JOIN usuarios u ON u.id = s.usuario_id"
                 " WHERE s.token_hash = ? AND s.expira_em > ? AND u.ativo = 1",
-                (_hash_token(token), time.time()),
+                (th, agora),
             ).fetchone()
+            if row:
+                novo = min(agora + self.sessao_s, row["s_criada"] + self.SESSAO_MAX_S)
+                if novo - row["s_expira"] >= self.RENOVAR_A_CADA_S:
+                    db.execute("UPDATE sessoes SET expira_em = ? WHERE token_hash = ?", (novo, th))
         return _usuario(row) if row else None
 
     def logout(self, token: str | None) -> None:

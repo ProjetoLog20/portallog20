@@ -182,6 +182,8 @@ def gerar_manifesto(d: dict, com_dockerfile: bool) -> str:
         linhas += ["", "# Supabase proprio, criado pelo portal so para esta solucao (banco, login e arquivos).",
                    "# O portal preenche estas variaveis: endereco (o mesmo do sistema) e chave publica.", "[supabase]",
                    *[f"{k} = {_s(v)}" for k, v in d["supabase"].items() if v or k in ("url", "chave_anon")]]
+        if d.get("supabase_realtime"):
+            linhas += ["# Servico de tempo real (supabase-js .channel()): telas que atualizam sozinhas.", "realtime = true"]
     for c in d["configuracoes"]:
         linhas += ["", "[[configuracoes]]", f"nome = {_s(c['nome'])}", f"rotulo = {_s(c.get('rotulo') or c['nome'])}",
                    f"tipo = {_s(c.get('tipo') or 'texto')}"]
@@ -306,6 +308,7 @@ def _limpar(d: dict, cfg: Config, solucoes: dict[str, Solucao], editando: str | 
             "tecnologia": str(d.get("tecnologia") or "")[:80], "repositorio": repositorio, "ref": ref, "subpasta": subpasta,
             "porta_container": porta_c, "porta_host": porta_h, "caminho_saude": saude, "ambiente": ambiente,
             "volumes": volumes, "segredos": segredos, "configuracoes": configuracoes, "banco": banco, "supabase": supabase,
+            "supabase_realtime": bool(supabase and d.get("supabase_realtime")),
             "dockerfile": dockerfile, "arquivos": arquivos if dockerfile else {},
             "variaveis_na_construcao": bool(d.get("variaveis_na_construcao"))}
 
@@ -385,6 +388,7 @@ def para_edicao(cfg: Config, sol: Solucao) -> dict:
                            "obrigatoria": c.obrigatoria, "construcao": c.na_construcao} for c in sol.configuracoes],
         "banco": dict(sol.banco) if sol.banco else None, "usar_banco": bool(sol.banco),
         "supabase": dict(sol.supabase) if sol.supabase else None, "usar_supabase": bool(sol.supabase),
+        "supabase_realtime": sol.supabase_realtime,
         "variaveis_na_construcao": sol.variaveis_na_construcao,
         "tem_dockerfile": not df.is_file(), "dockerfile": df.read_text(encoding="utf-8") if df.is_file() else None,
         "arquivos": auxiliares,

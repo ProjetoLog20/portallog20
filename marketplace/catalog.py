@@ -139,6 +139,8 @@ class Solucao:
     # sistema), chave_anon (chave publica), url_interna e chave_servico (so para codigo que roda no
     # servidor; a chave de servico nunca vai para o site).
     supabase: dict[str, str] | None = None
+    # [supabase] realtime = true: a pilha ganha o servico de tempo real (supabase-js .channel())
+    supabase_realtime: bool = False
 
     @property
     def container(self) -> str:
@@ -279,12 +281,16 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         raise ManifestoInvalido(f"{caminho}: [backup] esquemas deve ser uma lista como [\"public\"]")
 
     supabase = None
+    supabase_realtime = False
     if "supabase" in dados:
         sec_sb = dados["supabase"]
         if not isinstance(sec_sb, dict):
             raise ManifestoInvalido(f"{caminho}: [supabase] deve ser uma tabela")
         if servico_externo:
             raise ManifestoInvalido(f"{caminho}: [supabase] nao combina com externo")
+        supabase_realtime = sec_sb.get("realtime", False)
+        if not isinstance(supabase_realtime, bool):
+            raise ManifestoInvalido(f"{caminho}: [supabase] realtime deve ser true ou false")
         supabase = {"url": str(sec_sb.get("url", "VITE_SUPABASE_URL")).strip(),
                     "chave_anon": str(sec_sb.get("chave_anon", "VITE_SUPABASE_ANON_KEY")).strip(),
                     "url_interna": str(sec_sb.get("url_interna", "")).strip(),
@@ -361,6 +367,7 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         recursos_memoria_mb=rec_mem,
         recursos_cpus=rec_cpus,
         supabase=supabase,
+        supabase_realtime=supabase_realtime,
     )
 
 

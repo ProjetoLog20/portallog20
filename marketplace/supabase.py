@@ -46,17 +46,22 @@ IMAGENS = {
     "storage": "supabase/storage-api:v1.89.12",
     "meta": "supabase/postgres-meta:v0.100.0",
     "gw": "envoyproxy/envoy:v1.39.6",
+    "realtime": "supabase/realtime:v2.148.3",
     "studio": "supabase/studio:2026.11.02-sha-a05e7ec",
 }
 # Ordem de subida (o banco primeiro, o gateway por ultimo); para parar, a ordem inversa.
-SERVICOS = ("db", "auth", "rest", "meta", "storage", "gw")
-ROTULOS = {"db": "banco", "auth": "login", "rest": "API de dados", "meta": "meta (painel)",
-           "storage": "arquivos", "gw": "gateway", "studio": "Studio"}
+SERVICOS = ("db", "auth", "rest", "realtime", "meta", "storage", "gw")
+# So existem quando a solucao pede ([supabase] realtime = true); sem isso nao contam como falta.
+OPCIONAIS = ("realtime",)
+ROTULOS = {"db": "banco", "auth": "login", "rest": "API de dados", "realtime": "tempo real (Realtime)",
+           "meta": "meta (painel)", "storage": "arquivos", "gw": "gateway", "studio": "Studio"}
+# Nome que o gateway (envoy) usa para o Realtime; dele o Realtime tira o tenant ("realtime-dev").
+APELIDO_REALTIME = "realtime-dev.supabase-realtime"
 STUDIO = "log20-sb-studio"
 PORTA_GATEWAY = 8000
 ANOS_CHAVES = 10
 # Caminhos da API do Supabase que os sistemas usam pelo navegador (dados, login e arquivos).
-CAMINHOS_API = ("/rest/v1/*", "/auth/v1/*", "/storage/v1/*")
+CAMINHOS_API = ("/rest/v1/*", "/auth/v1/*", "/storage/v1/*", "/realtime/v1/*")
 # Nomes padrao das variaveis que recebem o endereco e a chave publica (o que o supabase-js usa).
 VARIAVEL_URL = "VITE_SUPABASE_URL"
 VARIAVEL_CHAVE = "VITE_SUPABASE_ANON_KEY"
@@ -139,6 +144,9 @@ class Segredos:
     s3_id: str
     s3_segredo: str
     criado_em: str = ""
+    # Realtime (criados na primeira vez que ele e ligado; pilhas antigas nao tem)
+    realtime_chave_base: str = ""
+    realtime_cripto: str = ""
 
 
 def _arquivo_segredos(pasta_dados: Path, sid: str) -> Path:
@@ -171,6 +179,76 @@ def segredos(pasta_dados: Path, sid: str, criar: bool = True) -> Segredos | None
             json.dump(vars(seg), fh, indent=2)
         tmp.replace(arq)
         return seg
+
+
+def _gravar_json_privado(arq: Path, dados: dict) -> None:
+    arq.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(arq.parent, 0o700)
+    tmp = arq.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(dados, fh, indent=2, ensure_ascii=False)
+    tmp.replace(arq)
+
+
+def completar_segredos(pasta_dados: Path, sid: str, seg: Segredos) -> Segredos:
+    """Acrescenta os segredos do Realtime a uma pilha que ainda nao os tem (sem mexer nos outros)."""
+    if seg.realtime_chave_base and len(seg.realtime_cripto) == 16:
+        return seg
+    with _trava_geral:
+        seg.realtime_chave_base = seg.realtime_chave_base or secrets.token_urlsafe(48)
+        if len(seg.realtime_cripto) != 16:
+            seg.realtime_cripto = secrets.token_hex(8)  # o Realtime exige exatamente 16 caracteres
+        _gravar_json_privado(_arquivo_segredos(pasta_dados, sid), vars(seg))
+    return seg
+
+
+# ---------------------------------------------------------------- login e e-mail por solucao
+
+@dataclass
+class LoginConfig:
+    """E-mail do login (convite, confirmacao, esqueci a senha) e cadastro, por solucao.
+    Servidor em branco = usa o e-mail do .env (SUPABASE_SMTP_*), igual para todas."""
+    smtp_servidor: str = ""
+    smtp_porta: str = "587"
+    smtp_usuario: str = ""
+    smtp_senha: str = ""
+    smtp_remetente: str = ""
+    smtp_nome: str = ""
+    cadastro_aberto: bool = True
+
+
+def _arquivo_login(pasta_dados: Path, sid: str) -> Path:
+    return pasta_dados / "supabase" / f"{sid}.login.json"
+
+
+def ler_login(pasta_dados: Path, sid: str) -> LoginConfig:
+    arq = _arquivo_login(pasta_dados, sid)
+    if not arq.is_file():
+        return LoginConfig()
+    dados = json.loads(arq.read_text(encoding="utf-8"))
+    return LoginConfig(**{k: dados[k] for k in LoginConfig.__dataclass_fields__ if k in dados})
+
+
+def gravar_login(pasta_dados: Path, sid: str, cfg: LoginConfig) -> None:
+    _gravar_json_privado(_arquivo_login(pasta_dados, sid), vars(cfg))
+
+
+def smtp_global() -> dict[str, str]:
+    e = os.environ.get
+    return {"servidor": e("SUPABASE_SMTP_SERVIDOR", ""), "porta": e("SUPABASE_SMTP_PORTA", "") or "587",
+            "usuario": e("SUPABASE_SMTP_USUARIO", ""), "senha": e("SUPABASE_SMTP_SENHA", ""),
+            "remetente": e("SUPABASE_SMTP_REMETENTE", ""), "nome": e("SUPABASE_SMTP_NOME", "")}
+
+
+def smtp_efetivo(login: LoginConfig | None) -> tuple[dict[str, str], str]:
+    """(dados do SMTP, origem): o da solucao quando tem servidor; senao o do .env; senao nenhum."""
+    if login and login.smtp_servidor:
+        return ({"servidor": login.smtp_servidor, "porta": login.smtp_porta or "587",
+                 "usuario": login.smtp_usuario, "senha": login.smtp_senha,
+                 "remetente": login.smtp_remetente, "nome": login.smtp_nome}, "sistema")
+    g = smtp_global()
+    return g, ("servidor" if g["servidor"] else "nenhum")
 
 
 def conferir(pasta_dados: Path, sid: str) -> list[str]:
@@ -213,25 +291,28 @@ class Servico:
         return hashlib.sha256(json.dumps(dados, sort_keys=True).encode()).hexdigest()[:24]
 
 
-def _smtp() -> dict[str, str]:
-    """E-mail do login (opcional, igual para todos os projetos): SUPABASE_SMTP_* no .env do portal."""
-    e = os.environ.get
+def _smtp(login: LoginConfig | None) -> dict[str, str]:
+    """E-mail do login: o da solucao (tela Gerenciar) ou o do .env do portal (SUPABASE_SMTP_*)."""
+    d, _ = smtp_efetivo(login)
     return {
-        "GOTRUE_SMTP_ADMIN_EMAIL": e("SUPABASE_SMTP_REMETENTE", ""),
-        "GOTRUE_SMTP_HOST": e("SUPABASE_SMTP_SERVIDOR", ""),
-        "GOTRUE_SMTP_PORT": e("SUPABASE_SMTP_PORTA", "") or "587",
-        "GOTRUE_SMTP_USER": e("SUPABASE_SMTP_USUARIO", ""),
-        "GOTRUE_SMTP_PASS": e("SUPABASE_SMTP_SENHA", ""),
-        "GOTRUE_SMTP_SENDER_NAME": e("SUPABASE_SMTP_NOME", "") or "Portal LOG20",
+        "GOTRUE_SMTP_ADMIN_EMAIL": d["remetente"],
+        "GOTRUE_SMTP_HOST": d["servidor"],
+        "GOTRUE_SMTP_PORT": d["porta"] or "587",
+        "GOTRUE_SMTP_USER": d["usuario"],
+        "GOTRUE_SMTP_PASS": d["senha"],
+        "GOTRUE_SMTP_SENDER_NAME": d["nome"] or "Portal LOG20",
     }
 
 
-def especificacao(sid: str, seg: Segredos, url: str) -> list[Servico]:
-    """Os containers da pilha, como no compose oficial. `url` = endereco publico do sistema."""
+def especificacao(sid: str, seg: Segredos, url: str, realtime: bool = False,
+                  login: LoginConfig | None = None) -> list[Servico]:
+    """Os containers da pilha, como no compose oficial. `url` = endereco publico do sistema.
+    `realtime`: inclui o servico de tempo real ([supabase] realtime = true no manifesto)."""
     url = url.rstrip("/")
     senha = seg.senha_banco
     jwt_exp = "3600"
-    smtp = _smtp()
+    login = login or LoginConfig()
+    smtp = _smtp(login)
     autoconfirmar = "false" if smtp["GOTRUE_SMTP_HOST"] else "true"
     esquemas = "public,graphql_public"
     c = lambda s: container(sid, s)  # noqa: E731
@@ -255,7 +336,7 @@ def especificacao(sid: str, seg: Segredos, url: str) -> list[Servico]:
                      "GOTRUE_SITE_URL": url, "GOTRUE_URI_ALLOW_LIST": f"{url}/**",
                      # Cadastro ligado (o Panorama cria usuarios pela tela dele, com signUp). Sem
                      # e-mail configurado, a confirmacao e automatica.
-                     "GOTRUE_DISABLE_SIGNUP": "false", "GOTRUE_EXTERNAL_EMAIL_ENABLED": "true",
+                     "GOTRUE_DISABLE_SIGNUP": "false" if login.cadastro_aberto else "true", "GOTRUE_EXTERNAL_EMAIL_ENABLED": "true",
                      "GOTRUE_MAILER_AUTOCONFIRM": autoconfirmar,
                      "GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED": "false", "GOTRUE_EXTERNAL_PHONE_ENABLED": "false",
                      "GOTRUE_SMS_AUTOCONFIRM": "false", "GOTRUE_JWT_ADMIN_ROLES": "service_role",
@@ -275,6 +356,17 @@ def especificacao(sid: str, seg: Segredos, url: str) -> list[Servico]:
                      "PGRST_ADMIN_SERVER_HOST": "localhost", "PGRST_JWT_SECRET": seg.jwt_secret,
                      "PGRST_DB_USE_LEGACY_GUCS": "false", "PGRST_APP_SETTINGS_JWT_EXP": jwt_exp},
                 comando=["postgrest"]),
+        *([Servico("realtime", c("realtime"), IMAGENS["realtime"], apelidos=[APELIDO_REALTIME, "realtime"],
+                   env={"PORT": "4000", "DB_HOST": "db", "DB_PORT": "5432", "DB_USER": "supabase_admin",
+                        "DB_PASSWORD": senha, "DB_NAME": "postgres",
+                        "DB_AFTER_CONNECT_QUERY": "SET search_path TO _realtime",
+                        "DB_ENC_KEY": seg.realtime_cripto, "API_JWT_SECRET": seg.jwt_secret,
+                        "SECRET_KEY_BASE": seg.realtime_chave_base, "METRICS_JWT_SECRET": seg.jwt_secret,
+                        "ERL_AFLAGS": "-proto_dist inet_tcp", "DNS_NODES": "''", "RLIMIT_NOFILE": "10000",
+                        "APP_NAME": "realtime", "SEED_SELF_HOST": "true", "RUN_JANITOR": "true",
+                        "DISABLE_HEALTHCHECK_LOGGING": "true"},
+                   saude=f'curl -sSfL --head -o /dev/null -H "Authorization: Bearer {seg.anon}" '
+                         "http://localhost:4000/api/tenants/realtime-dev/health")] if realtime else []),
         Servico("meta", c("meta"), IMAGENS["meta"], apelidos=["meta"],
                 env={"PG_META_PORT": "8080", "PG_META_DB_HOST": "db", "PG_META_DB_PORT": "5432",
                      "PG_META_DB_NAME": "postgres", "PG_META_DB_USER": "postgres", "PG_META_DB_PASSWORD": senha,
@@ -405,8 +497,18 @@ def _trava(sid: str) -> threading.Lock:
 
 # ---------------------------------------------------------------- operacoes
 
+def _esquema_realtime(sid: str, seg: Segredos) -> None:
+    """O esquema _realtime so e criado pelo banco novo na primeira vez; num banco que ja existia
+    (ou copiado de outro Supabase) o Realtime nao sobe sem ele."""
+    sql = "create schema if not exists _realtime; alter schema _realtime owner to supabase_admin;"
+    r = docker_cli._run(["exec", "-e", "PGPASSWORD", container(sid, "db"), "psql", "-h", "localhost", "-U",
+                         "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-qc", sql],
+                        timeout=60, env={"PGPASSWORD": seg.senha_banco})
+    docker_cli._check(r, "Falha ao preparar o banco para o Realtime")
+
+
 def garantir(sid: str, url: str, pasta_dados: Path, rede_portal: str,
-             registrar: Callable[[str], None] = print) -> Segredos:
+             registrar: Callable[[str], None] = print, realtime: bool = False) -> Segredos:
     """Deixa a pilha da solucao no ar com a configuracao atual. Rodar de novo nao apaga nada.
 
     Container que nao existe ou com configuracao diferente (o rotulo log20.sb.hash) e recriado;
@@ -414,6 +516,8 @@ def garantir(sid: str, url: str, pasta_dados: Path, rede_portal: str,
     """
     with _trava(sid):
         seg = segredos(pasta_dados, sid)
+        if realtime:
+            seg = completar_segredos(pasta_dados, sid, seg)
         if not _estado(container(sid, "db"))["existe"]:
             import shutil
 
@@ -422,7 +526,11 @@ def garantir(sid: str, url: str, pasta_dados: Path, rede_portal: str,
                 registrar(f"ATENCAO: so {livre_gb:.1f} GB livres no disco. As imagens do Supabase ocupam cerca de 3 GB e o banco cresce com os dados. Se faltar espaco, a criacao falha.")
         _garantir_rede(rede(sid), sid)
         mudou_algo = False
-        for s in especificacao(sid, seg, url):
+        if not realtime and _estado(container(sid, "realtime"))["existe"]:
+            registrar(f"Supabase: {ROTULOS['realtime']}: desligado (o manifesto nao pede mais)")
+            docker_cli.remove(container(sid, "realtime"))
+            mudou_algo = True
+        for s in especificacao(sid, seg, url, realtime, ler_login(pasta_dados, sid)):
             atual = _estado(s.container)
             rotulo = f"Supabase: {ROTULOS[s.nome]}"
             if atual["existe"] and atual["hash"] == s.resumo():
@@ -431,6 +539,8 @@ def garantir(sid: str, url: str, pasta_dados: Path, rede_portal: str,
                     docker_cli.rodar(["start", s.container], timeout=120)
                     mudou_algo = True
             else:
+                if s.nome == "realtime":
+                    _esquema_realtime(sid, seg)
                 registrar(f"{rotulo}: {'atualizando a configuracao' if atual['existe'] else 'criando'} "
                           f"({s.imagem})" + (" - baixando a imagem na primeira vez" if not atual["existe"] else ""))
                 _criar(s, sid, rede(sid), rede_portal)
@@ -439,7 +549,9 @@ def garantir(sid: str, url: str, pasta_dados: Path, rede_portal: str,
                 _esperar(s.container, "banco do Supabase", 300, registrar)
         _esperar(container(sid, "gw"), "gateway do Supabase", 180, registrar)
         _esperar(container(sid, "storage"), "servico de arquivos do Supabase", 120, registrar)
-        for s in ("auth", "storage"):
+        if realtime:
+            _esperar(container(sid, "realtime"), "tempo real (Realtime) do Supabase", 180, registrar)
+        for s in ("auth", "storage", *(("realtime",) if realtime else ())):
             e = _estado(container(sid, s))
             if e.get("reiniciando") or (e["existe"] and not e["rodando"]):
                 raise ErroSupabase(f"O {ROTULOS[s]} do Supabase nao ficou no ar. Ultimas linhas:\n"
@@ -516,6 +628,8 @@ def estado(sid: str) -> dict:
     partes = []
     for s in SERVICOS:
         e = _estado(container(sid, s))
+        if not e["existe"] and s in OPCIONAIS:
+            continue
         if not e["existe"]:
             situacao = "nao criado"
         elif e.get("reiniciando"):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import html
 import os
+import re
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -15,7 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from . import config as config_mod
 from . import assistente, docker_cli, proxy
 from . import supabase as sb
-from . import supabase_copia
+from . import supabase_copia, supabase_estrutura
+from . import fontes as fontes_mod
 from .backup import Backups, ErroBackup, formatar_tamanho, resumo
 from .catalog import cpus_validas, memoria_mb
 from .uso import INFRA, Uso
@@ -155,7 +157,9 @@ def _publico(u: Usuario) -> dict:
 def _definir_cookie(resp: Response, token: str) -> None:
     resp.set_cookie(
         COOKIE, token,
-        max_age=CFG.sessao_horas * 3600,
+        # O prazo de verdade fica no servidor (vence depois de PORTAL_SESSAO_HORAS sem uso, inclusive
+        # o uso dos sistemas pelo Caddy, que nao repassa cookies novos): o do navegador e o maximo.
+        max_age=Autenticacao.SESSAO_MAX_S,
         httponly=True,
         samesite="lax",
         secure=CFG.cookie_seguro,
@@ -452,12 +456,158 @@ def _detalhe_supabase(sol: Solucao, docker_ok: bool) -> dict | None:
     rotulos = {"url": "endereço, o mesmo do sistema", "chave_anon": "chave pública (anon)",
                "url_interna": "endereço na rede interna, para o servidor do sistema",
                "chave_servico": "chave de serviço (service_role), só no servidor"}
+    imp = supabase_copia.ultima_importacao(CFG.pasta_dados, sol.id)
+    if imp:
+        try:
+            BACKUPS.obter(imp["backup"])
+            imp["existe"] = True
+        except ErroBackup:
+            imp["existe"] = False
     return {
         "variaveis": [{"nome": nome, "conteudo": rotulos[campo]} for campo, nome in sol.supabase.items() if nome],
         "estado": estado,
         "studio": {"porta": studio.porta_host, "url": ger().url(studio) + "/"} if studio else None,
         "volumes": sb.volumes(sol.id),
+        "realtime": sol.supabase_realtime,
+        "importacao": imp,
+        "login": _login_publico(sol.id),
     }
+
+
+def _login_publico(sid: str) -> dict:
+    """Configuracao de login e e-mail para a tela (sem a senha do e-mail)."""
+    lg = sb.ler_login(CFG.pasta_dados, sid)
+    _, origem = sb.smtp_efetivo(lg)
+    dados = {k: v for k, v in vars(lg).items() if k != "smtp_senha"}
+    dados.update({"tem_senha": bool(lg.smtp_senha), "origem_smtp": origem,
+                  "servidor_global": sb.smtp_global()["servidor"]})
+    return dados
+
+
+SMTP_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$")
+EMAIL_RE = re.compile(r"^[^@\s<>\"]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,}$")
+
+
+def _validar_login(dados: dict, atual: sb.LoginConfig) -> sb.LoginConfig:
+    servidor = str(dados.get("smtp_servidor") or "").strip()
+    cfg = sb.LoginConfig(cadastro_aberto=bool(dados.get("cadastro_aberto", True)))
+    if not servidor:
+        return cfg  # sem servidor: usa o e-mail do .env (e esquece a senha guardada)
+    if not SMTP_HOST_RE.match(servidor):
+        raise HTTPException(400, "Servidor de e-mail inválido (ex.: smtp.office365.com).")
+    porta = str(dados.get("smtp_porta") or "587").strip()
+    if not porta.isdigit() or not 1 <= int(porta) <= 65535:
+        raise HTTPException(400, "Porta do e-mail inválida (normalmente 587 ou 465).")
+    remetente = str(dados.get("smtp_remetente") or "").strip()
+    if not EMAIL_RE.match(remetente):
+        raise HTTPException(400, "Informe o e-mail do remetente (ex.: nao-responda@log20.com.br).")
+    usuario = str(dados.get("smtp_usuario") or "").strip()[:200]
+    senha = str(dados.get("smtp_senha") or "")
+    if not senha and usuario and atual.smtp_servidor == servidor and atual.smtp_usuario == usuario:
+        senha = atual.smtp_senha  # em branco mantem a guardada (mesmo servidor e usuario)
+    cfg.smtp_servidor, cfg.smtp_porta, cfg.smtp_usuario, cfg.smtp_senha = servidor, porta, usuario, senha[:500]
+    cfg.smtp_remetente, cfg.smtp_nome = remetente, " ".join(str(dados.get("smtp_nome") or "").split())[:80]
+    return cfg
+
+
+@app.put("/api/solucoes/{sid}/supabase/login")
+def api_supabase_login(sid: str, dados: dict = Body(..., embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
+    """E-mail do login (convite, confirmacao, esqueci a senha) e cadastro aberto/fechado do Supabase
+    da solucao. Se a pilha ja existe, so o container do login e recriado (os dados ficam)."""
+    sol = _solucao(sid)
+    if not sol.supabase:
+        raise HTTPException(400, "Esta solucao nao usa o Supabase do servidor.")
+    if any(x and x.get("estado") == "executando"
+           for x in (supabase_copia.situacao(sid), supabase_estrutura.situacao(sid))):
+        raise HTTPException(409, "Há uma importação em andamento. Espere terminar.")
+    atual = sb.ler_login(CFG.pasta_dados, sid)
+    novo = _validar_login(dados, atual)
+    sb.gravar_login(CFG.pasta_dados, sid, novo)
+    aplicado = False
+    if sb.gateway_no_ar(sid):
+        try:
+            sb.garantir(sid, ger().url(sol), CFG.pasta_dados, CFG.rede_docker, lambda _: None,
+                        realtime=sol.supabase_realtime)
+            aplicado = True
+        except (sb.ErroSupabase, docker_cli.DockerError) as exc:
+            raise HTTPException(409, f"Configuracao salva, mas o login nao reiniciou: {exc}") from exc
+    AUTH.registrar(autor, "Alterou login e e-mail do Supabase",
+                   f"{sid}: e-mail {'do sistema' if novo.smtp_servidor else 'do servidor'}, "
+                   f"cadastro {'aberto' if novo.cadastro_aberto else 'fechado'}")
+    return {"ok": True, "aplicado": aplicado, "login": _login_publico(sid)}
+
+
+@app.post("/api/solucoes/{sid}/supabase/login/testar")
+def api_supabase_login_testar(sid: str, dados: dict = Body(..., embed=True), _: Usuario = Depends(exigir_admin)) -> dict:
+    """Conecta no servidor de e-mail e confere usuario e senha, sem enviar nada."""
+    import smtplib
+    import ssl
+
+    sol = _solucao(sid)
+    if not sol.supabase:
+        raise HTTPException(400, "Esta solucao nao usa o Supabase do servidor.")
+    atual = sb.ler_login(CFG.pasta_dados, sid)
+    cfg = _validar_login(dados, atual) if str(dados.get("smtp_servidor") or "").strip() else atual
+    smtp, origem = sb.smtp_efetivo(cfg)
+    if origem == "nenhum":
+        raise HTTPException(400, "Nenhum servidor de e-mail configurado (nem neste sistema, nem no .env).")
+    porta = int(smtp["porta"] or 587)
+    try:
+        ctx = ssl.create_default_context()
+        if porta == 465:
+            con = smtplib.SMTP_SSL(smtp["servidor"], porta, timeout=15, context=ctx)
+        else:
+            con = smtplib.SMTP(smtp["servidor"], porta, timeout=15)
+            con.ehlo()
+            if con.has_extn("starttls"):
+                con.starttls(context=ctx)
+                con.ehlo()
+        with con:
+            if smtp["usuario"]:
+                con.login(smtp["usuario"], smtp["senha"])
+    except smtplib.SMTPAuthenticationError:
+        raise HTTPException(400, "O servidor de e-mail recusou o usuário ou a senha.") from None
+    except (OSError, smtplib.SMTPException) as exc:
+        raise HTTPException(400, f"Não foi possível conectar em {smtp['servidor']}:{porta}: {exc}") from None
+    return {"ok": True, "mensagem": f"Conexão com {smtp['servidor']}:{porta} OK"
+            + (" e usuário/senha aceitos." if smtp["usuario"] else " (sem usuário).")
+            + (" Usando o e-mail do servidor (.env)." if origem == "servidor" else "")}
+
+
+@app.post("/api/solucoes/{sid}/supabase/desfazer")
+def api_supabase_desfazer(sid: str, confirmacao: str = Body("", embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
+    """Volta o Supabase da solucao (banco, usuarios, arquivos e chaves) ao backup feito antes da
+    ultima importacao. Antes, a restauracao faz outro backup de seguranca (da para desfazer o desfazer)."""
+    sol = _solucao(sid)
+    if not sol.supabase:
+        raise HTTPException(400, "Esta solucao nao usa o Supabase do servidor.")
+    if confirmacao.strip() != sid:
+        raise HTTPException(400, f"Para confirmar, digite o identificador da solução: {sid}")
+    imp = supabase_copia.ultima_importacao(CFG.pasta_dados, sid)
+    if not imp:
+        raise HTTPException(404, "Nenhuma importação registrada para este sistema.")
+    copia = supabase_copia.situacao(sid)
+    est = supabase_estrutura.situacao(sid)
+    if any(x and x.get("estado") == "executando" for x in (copia, est)):
+        raise HTTPException(409, "Há uma importação em andamento. Espere terminar.")
+    t = ger().tarefas.get(sid)
+    if t and t.estado == "executando":
+        raise HTTPException(409, f"A solucao tem uma operacao em andamento: {t.acao}")
+    nome = imp["backup"]
+    try:
+        BACKUPS.obter(nome)
+
+        def rodar(tarefa) -> None:
+            tarefa.etapa = f"Desfazendo a importação de {sol.nome}"
+            BACKUPS.restaurar_solucao(nome, sid, banco=False, arquivos=False, supabase=True,
+                                      registrar=tarefa.registrar)
+            supabase_copia.arquivo_importacao(CFG.pasta_dados, sid).unlink(missing_ok=True)
+
+        BACKUPS.em_segundo_plano(f"desfazer importacao de {sid}", rodar)
+    except ErroBackup as exc:
+        raise HTTPException(409, str(exc)) from exc
+    AUTH.registrar(autor, "Desfez a importação do Supabase", f"{sid}: voltou ao backup {nome}")
+    return {"ok": True}
 
 
 @app.post("/api/solucoes/{sid}/supabase/studio")
@@ -487,14 +637,81 @@ def api_copiar_supabase(sid: str, dados: dict = Body(..., embed=True), autor: Us
         raise HTTPException(400, "Esta solucao nao usa o Supabase do servidor.")
     if str(dados.get("confirmacao") or "").strip() != sid:
         raise HTTPException(400, f"Para confirmar, digite o identificador da solução: {sid}")
+    est = supabase_estrutura.situacao(sid)
+    if est and est.get("estado") == "executando":
+        raise HTTPException(409, "Há uma criação de estrutura em andamento. Espere terminar.")
     try:
         origem, partes = supabase_copia.validar(dados)
-        supabase_copia.iniciar(sid, sol.nome, origem, partes, CFG.pasta_dados, BACKUPS.pasta)
+        supabase_copia.iniciar(sid, sol.nome, origem, partes, CFG.pasta_dados, BACKUPS.pasta,
+                               seguranca=lambda reg: _backup_antes_de_importar(sid, reg))
     except supabase_copia.ErroCopia as exc:
         raise HTTPException(400, str(exc)) from exc
     AUTH.registrar(autor, "Copiou dados para o Supabase do sistema",
                    f"{sid}: {', '.join(k for k, v in partes.items() if v)} de {origem.usuario}@{origem.host}")
     return {"ok": True, "copia": supabase_copia.situacao(sid)}
+
+
+def _backup_antes_de_importar(sid: str, registrar) -> str:
+    man = BACKUPS.fazer("antes-de-importar", registrar, somente=[sid])
+    if not man["ok"]:
+        raise ErroBackup("; ".join(man["erros"])[:500])
+    if not any(i["tipo"] == "supabase-volume" and i.get("chave") == "dados" and i.get("solucao") == sid
+               for i in man["itens"]):
+        raise ErroBackup("o backup nao trouxe o Supabase do sistema")
+    return man["nome"]
+
+
+def _raiz_codigo(sol: Solucao) -> Path:
+    """Pasta do codigo da solucao no servidor (a do ultimo Instalar/Atualizar)."""
+    if sol.repositorio:
+        raiz = fontes_mod.pasta_do_repositorio(CFG.pasta_dados / "fontes", sol.repositorio, sol.ref)
+    else:
+        raiz = sol.contexto_build
+    if not raiz or not Path(raiz).is_dir():
+        raise HTTPException(409, "O código deste sistema ainda não foi baixado. Clique em Instalar e tente de novo.")
+    return Path(raiz)
+
+
+@app.get("/api/solucoes/{sid}/supabase/estrutura")
+def api_estrutura_supabase(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
+    """Arquivos .sql do repositorio, se o banco esta vazio e a ultima execucao."""
+    sol = _solucao(sid)
+    if not sol.supabase:
+        raise HTTPException(400, "Esta solucao nao usa o Supabase do servidor.")
+    execucao = supabase_estrutura.situacao(sid)
+    raiz = _raiz_codigo(sol)
+    try:
+        tabelas = supabase_estrutura.tabelas_public(CFG.pasta_dados, sid)
+    except (supabase_copia.ErroCopia, docker_cli.DockerError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"arquivos": supabase_estrutura.listar(raiz, sol.subpasta), "tabelas": tabelas, "execucao": execucao}
+
+
+@app.post("/api/solucoes/{sid}/supabase/estrutura", status_code=202)
+def api_criar_estrutura(sid: str, arquivos: list[str] = Body(..., embed=True), confirmacao: str = Body("", embed=True),
+                        autor: Usuario = Depends(exigir_admin)) -> dict:
+    sol = _solucao(sid)
+    if not sol.supabase:
+        raise HTTPException(400, "Esta solucao nao usa o Supabase do servidor.")
+    if confirmacao.strip() != sid:
+        raise HTTPException(400, f"Para confirmar, digite o identificador da solução: {sid}")
+    copia = supabase_copia.situacao(sid)
+    if copia and copia.get("estado") == "executando":
+        raise HTTPException(409, "Há uma importação em andamento. Espere terminar.")
+    raiz = _raiz_codigo(sol)
+    try:
+        supabase_estrutura.iniciar(sid, raiz, arquivos, CFG.pasta_dados,
+                                   seguranca=lambda reg: _backup_antes_de_importar(sid, reg))
+    except supabase_copia.ErroCopia as exc:
+        raise HTTPException(400, str(exc)) from exc
+    AUTH.registrar(autor, "Criou a estrutura do Supabase pelos .sql", f"{sid}: {len(arquivos)} arquivo(s)")
+    return {"ok": True, "execucao": supabase_estrutura.situacao(sid)}
+
+
+@app.get("/api/solucoes/{sid}/supabase/estrutura/situacao")
+def api_estrutura_situacao(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
+    _solucao(sid)
+    return {"execucao": supabase_estrutura.situacao(sid)}
 
 
 @app.get("/api/solucoes/{sid}/supabase/copiar")

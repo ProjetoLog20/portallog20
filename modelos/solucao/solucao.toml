@@ -135,6 +135,7 @@ caminho_abrir = "/"
 # chave_anon = "VITE_SUPABASE_ANON_KEY"
 # chave_servico = "SUPABASE_SERVICE_ROLE_KEY"
 # url_interna = "SUPABASE_URL"
+# realtime = true   # tempo real (supabase-js .channel()), cerca de 200 MB a mais
 
 
 # ----------------------------------------------------------------------------

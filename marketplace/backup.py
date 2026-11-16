@@ -36,7 +36,7 @@ import threading
 import time
 import urllib.request
 from collections.abc import Callable, Iterator
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 
@@ -411,8 +411,15 @@ class Backups:
         itens: list[dict] = []
         erros: list[str] = []
 
-        solucoes = {sid: s for sid, s in ger.solucoes.items()
-                    if (somente is None or sid in somente) and s.backup_incluir and sid not in aj.excluir}
+        if somente is not None and motivo in ("antes-de-restaurar", "antes-de-importar"):
+            # Backup de seguranca: guarda tudo da solucao, mesmo o que os Ajustes ou o manifesto
+            # deixam fora do backup diario (e dele que se volta se a operacao der errado).
+            aj = replace(aj, incluir_bancos=True, incluir_volumes=True, incluir_externos=True,
+                         incluir_supabase=True, excluir=[])
+            solucoes = {sid: s for sid, s in ger.solucoes.items() if sid in somente}
+        else:
+            solucoes = {sid: s for sid, s in ger.solucoes.items()
+                        if (somente is None or sid in somente) and s.backup_incluir and sid not in aj.excluir}
         ignoradas = sorted(set(ger.solucoes) - set(solucoes)) if somente is None else []
         registrar(f"Backup {nome} em {self.pasta}")
         if ignoradas:
@@ -746,6 +753,12 @@ class Backups:
         for lista_grupo in grupos.values():
             ficar.update(m["nome"] for m in lista_grupo[:aj.manter_avulsos])
         ficar.update(m["nome"] for m in lista if m.get("fixado"))
+        # O backup de antes da ultima importacao de cada Supabase fica (e o "Desfazer a ultima importacao").
+        for arq in (self.cfg.pasta_dados / "supabase").glob("*.importacao.json"):
+            try:
+                ficar.add(json.loads(arq.read_text(encoding="utf-8"))["backup"])
+            except (OSError, ValueError, KeyError):
+                pass
         completos_ok = [m for m in lista if m.get("ok") and not m.get("parcial")]
         if completos_ok:  # nunca apaga o ultimo backup completo bom
             ficar.add(completos_ok[0]["nome"])
