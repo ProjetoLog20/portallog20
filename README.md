@@ -8,8 +8,14 @@ Portal para disponibilizar soluções conteinerizadas, com login.
   - **Usuários**: criar um a um ou **importar em lote** (colar do Excel ou abrir um CSV),
     procurar, filtrar, editar, redefinir senha e, selecionando várias pessoas, liberar ou
     retirar sistemas e desativar/reativar de uma vez;
-  - **Acessos**: tabela pessoa × sistema para marcar quem abre o quê (vale na hora) e o
-    **histórico** de quem mudou o quê (criações, acessos, perfis, senhas redefinidas).
+  - **Acessos**, em três abas (tudo vale na hora):
+    - **Por sistema**: sistemas por área com quantas pessoas usam cada um; ao escolher um, quem tem
+      acesso (com "Retirar" e "retirar de todos"), um campo para adicionar pessoas pelo nome ou
+      usuário, **colar uma lista de usuários** (uma coluna do Excel serve) e **copiar o acesso de
+      outro sistema**;
+    - **Por pessoa**: os sistemas da pessoa como cartões por área, para marcar e desmarcar, e
+      **copiar acessos de outra pessoa** (só acrescenta, ninguém perde acesso);
+    - **Histórico** de quem mudou o quê (criações, acessos, perfis, senhas redefinidas).
     Sistemas com `somente_admin = true` no manifesto (pgAdmin e Supabase Studio, que dão acesso
     total aos bancos) abrem só para administradores: não podem ser liberados, o backend recusa, e
     liberações antigas são retiradas ao iniciar o portal (fica registrado no histórico).

@@ -978,7 +978,7 @@ async function carregarPessoas(sol) {
         ? h("ul", { class: "pessoas" }, comAcesso.slice(0, 12).map((u) => h("li", {}, avatar(u, "pequeno"), u.nome)),
             comAcesso.length > 12 ? h("li", { class: "nota" }, `e mais ${comAcesso.length - 12}`) : null)
         : null,
-      h("a", { class: "botao", href: "#/admin/acessos" }, "Gerenciar acessos"));
+      h("a", { class: "botao", href: "#/admin/acessos", onclick: () => { estadoAcessos.aba = "sistema"; estadoAcessos.sistema = sol.id; } }, "Gerenciar acessos"));
   } catch (e) { alvo.replaceChildren(h("p", { class: "nota" }, e.message)); }
 }
 
@@ -1525,120 +1525,423 @@ function dialogoResultadoLote(criados, solucoes) {
 
 /* ================= admin: acessos ================= */
 
-const estadoAcessos = { aba: "matriz", busca: "", inativos: false, buscaHist: "" };
+const estadoAcessos = { aba: "sistema", buscaHist: "", sistema: null, pessoa: null, buscaSis: "", buscaPes: "", inativos: false, filtroQuem: "", todos: false };
 
 async function telaAcessos() {
-  const abas = [["matriz", "Quem acessa o quê"], ["historico", "Histórico de alterações"]];
+  const abas = [["sistema", "Por sistema"], ["pessoa", "Por pessoa"], ["historico", "Histórico de alterações"]];
+  if (!abas.some(([k]) => k === estadoAcessos.aba)) estadoAcessos.aba = "sistema";
   $conteudo.replaceChildren(
     h("section", { class: "intro" },
       h("h1", {}, "Acessos"),
-      h("p", {}, "Marque quem pode abrir cada sistema. A mudança é aplicada imediatamente.")),
+      h("p", {}, "Quem pode abrir cada sistema. A mudança vale na hora.")),
     h("div", { class: "abas", role: "tablist" }, abas.map(([k, rotulo]) =>
       h("button", { type: "button", role: "tab", "aria-selected": String(estadoAcessos.aba === k), onclick: () => { estadoAcessos.aba = k; telaAcessos(); } }, rotulo))),
     h("div", { id: "acessos-corpo" }, h("p", { class: "nota" }, "Carregando…")));
-  if (estadoAcessos.aba === "historico") await pintarHistorico();
-  else await pintarMatriz();
+  if (estadoAcessos.aba === "historico") { await pintarHistorico(); return; }
+  await carregarUsuarios();
+  if (estadoAcessos.aba === "pessoa") pintarPorPessoa(); else pintarPorSistema();
 }
 
-async function pintarMatriz() {
-  const dados = await carregarUsuarios();
-  const usuarios = dados.usuarios;
-  // Os sistemas só de administradores vão para o fim (não têm o que marcar).
-  const solucoes = [...dados.solucoes].sort((a, b) => (a.somente_admin === true) - (b.somente_admin === true));
+/* ---- dados e ações comuns das abas de acesso ---- */
+
+const ehUsuarioComum = (u) => u.perfil !== "admin";
+const ativosComuns = () => estadoUsuarios.dados.usuarios.filter((u) => u.ativo && ehUsuarioComum(u));
+const adminsAtivos = () => estadoUsuarios.dados.usuarios.filter((u) => u.ativo && !ehUsuarioComum(u));
+const comAcesso = (sid) => estadoUsuarios.dados.usuarios.filter((u) => ehUsuarioComum(u) && u.solucoes.includes(sid));
+
+/** Sistemas agrupados por área; os "só administradores" no fim de cada área e áreas só deles por último. */
+function sistemasPorArea(filtro = "") {
+  const termo = normalizar(filtro);
+  const lista = estadoUsuarios.dados.solucoes.filter((s) => !termo || normalizar(`${s.nome} ${s.categoria}`).includes(termo));
+  const areas = new Map();
+  for (const s of [...lista].sort((a, b) => (a.somente_admin === true) - (b.somente_admin === true) || a.nome.localeCompare(b.nome, "pt-BR"))) {
+    const a = s.categoria || "Geral";
+    if (!areas.has(a)) areas.set(a, []);
+    areas.get(a).push(s);
+  }
+  return [...areas.entries()].sort(([a, la], [b, lb]) =>
+    (la.every((s) => s.somente_admin) - lb.every((s) => s.somente_admin)) || a.localeCompare(b, "pt-BR"));
+}
+
+/** Libera ou retira e atualiza os dados da tela (sem recarregar tudo). */
+async function mudarAcesso(uids, sids, conceder) {
+  if (!uids.length || !sids.length) return 0;
+  const r = await api("/api/acessos", { method: "POST", body: { usuarios: uids, solucoes: sids, conceder } });
+  for (const u of estadoUsuarios.dados.usuarios) {
+    if (!uids.includes(u.id) || !ehUsuarioComum(u)) continue;
+    const atual = new Set(u.solucoes);
+    for (const s of sids) { if (conceder) atual.add(s); else atual.delete(s); }
+    u.solucoes = [...atual].sort();
+  }
+  return r.alterados;
+}
+
+function repintarAcessos() {
+  if (estadoAcessos.aba === "pessoa") pintarPorPessoa(); else pintarPorSistema();
+}
+
+function itemLado(ativo, conteudo, onclick) {
+  return h("button", { type: "button", class: `item-lado${ativo ? " ativo" : ""}`, "aria-current": ativo ? "true" : null,
+    onclick: () => { onclick(); rolarParaDetalhe(); } }, conteudo);
+}
+
+/** No celular o detalhe fica embaixo da lista: leva a tela até ele. */
+function rolarParaDetalhe() {
+  if (window.matchMedia("(max-width: 900px)").matches) {
+    document.querySelector(".detalhe-acesso")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+/** Mantém o item escolhido visível na lista da esquerda depois de repintar. */
+function manterRolagem(lista, antes) {
+  if (antes != null) lista.scrollTop = antes;
+}
+
+/* ---- aba "Por sistema" ---- */
+
+function pintarPorSistema() {
   const alvo = document.getElementById("acessos-corpo");
   if (!alvo) return;
+  const { solucoes } = estadoUsuarios.dados;
   if (!solucoes.length) {
     alvo.replaceChildren(h("div", { class: "vazio" }, h("strong", {}, "Nenhuma solução no catálogo"), h("p", {}, "Publique uma solução em Soluções para liberar acesso a ela.")));
     return;
   }
-  const busca = h("input", {
-    type: "search", class: "busca", placeholder: "Procurar pessoa", "aria-label": "Procurar pessoa", value: estadoAcessos.busca,
-    oninput: (ev) => { estadoAcessos.busca = ev.target.value; pintarLinhas(); },
-  });
-  const inativos = h("label", { class: "campo-check compacto" },
-    h("input", { type: "checkbox", checked: estadoAcessos.inativos, onchange: (ev) => { estadoAcessos.inativos = ev.target.checked; pintarLinhas(); } }),
-    h("span", {}, "Mostrar desativados"));
-  const corpo = h("tbody");
-  const contadores = new Map();
+  if (!solucoes.some((s) => s.id === estadoAcessos.sistema)) {
+    estadoAcessos.sistema = (solucoes.find((s) => !s.somente_admin) || solucoes[0]).id;
+  }
+  const rolagemAntes = alvo.querySelector(".lista-lado-itens")?.scrollTop;
+  const itens = h("div", { class: "lista-lado-itens" });
+  const pintarLista = () => {
+    const grupos = sistemasPorArea(estadoAcessos.buscaSis);
+    itens.replaceChildren(...grupos.flatMap(([area, lista]) => [
+      h("div", { class: "grupo-titulo" }, area),
+      ...lista.map((s) => itemLado(s.id === estadoAcessos.sistema, [
+        logoSistema(s, "mini"), h("span", { class: "nome" }, s.nome),
+        s.somente_admin ? h("span", { class: "etiqueta-admin" }, "Só administradores")
+          : h("span", { class: "contador" }, plural(comAcesso(s.id).filter((u) => u.ativo).length, "pessoa", "pessoas"))],
+        () => { estadoAcessos.sistema = s.id; estadoAcessos.filtroQuem = ""; estadoAcessos.todos = false; pintarPorSistema(); })),
+    ]));
+    if (!grupos.length) itens.append(h("p", { class: "nota vazio-lado" }, "Nenhum sistema encontrado."));
+  };
+  const busca = h("input", { type: "search", class: "busca", placeholder: "Procurar sistema", "aria-label": "Procurar sistema", value: estadoAcessos.buscaSis,
+    oninput: (ev) => { estadoAcessos.buscaSis = ev.target.value; pintarLista(); } });
+  pintarLista();
+  const sol = solucoes.find((s) => s.id === estadoAcessos.sistema);
+  alvo.replaceChildren(h("div", { class: "duas-colunas" },
+    h("section", { class: "painel lista-lado", "aria-label": "Sistemas" }, h("div", { class: "busca-lado" }, busca), itens),
+    detalheSistema(sol)));
+  manterRolagem(itens, rolagemAntes);
+}
 
-  const visiveis = () => {
-    const termo = normalizar(estadoAcessos.busca);
-    return usuarios.filter((u) => (estadoAcessos.inativos || u.ativo) && (!termo || normalizar(`${u.nome} ${u.usuario}`).includes(termo)))
-      .sort((a, b) => (a.perfil === "admin") - (b.perfil === "admin") || a.nome.localeCompare(b.nome, "pt-BR"));
+function detalheSistema(sol) {
+  const admins = adminsAtivos();
+  const cabeca = h("div", { class: "cabeca-detalhe" }, logoSistema(sol, "medio"),
+    h("div", {}, h("h2", {}, sol.nome),
+      h("p", {}, sol.somente_admin
+        ? `${sol.categoria || "Geral"} · só administradores do portal abrem (${plural(admins.length, "administrador", "administradores")})`
+        : `${sol.categoria || "Geral"} · ${plural(comAcesso(sol.id).filter((u) => u.ativo).length, "pessoa com acesso", "pessoas com acesso")}, além de ${plural(admins.length, "administrador", "administradores")}`)));
+  if (sol.somente_admin) {
+    return h("section", { class: "painel detalhe-acesso" }, cabeca,
+      h("p", { class: "nota" }, "Este sistema dá acesso total a bancos de dados. Não pode ser liberado para usuários: para dar acesso, torne a pessoa administradora em Usuários."),
+      h("table", { class: "tabela-pessoas" }, h("tbody", {}, admins.map((u) => linhaPessoa(u, null)))));
+  }
+
+  // adicionar pessoa: busca com sugestões
+  const candidatos = () => ativosComuns().filter((u) => !u.solucoes.includes(sol.id));
+  const campo = h("input", { type: "search", class: "busca", placeholder: "Adicionar pessoa: nome ou usuário", "aria-label": "Adicionar pessoa",
+    autocomplete: "off", role: "combobox", "aria-expanded": "false", "aria-controls": "sugestoes-acesso" });
+  const caixa = h("div", { class: "sugestoes", id: "sugestoes-acesso", role: "listbox", hidden: true });
+  let opcoes = [];
+  let foco = 0;
+  const pintarSugestoes = () => {
+    const termo = normalizar(campo.value.trim());
+    if (!termo) { caixa.hidden = true; campo.setAttribute("aria-expanded", "false"); return; }
+    const todos = estadoUsuarios.dados.usuarios.filter((u) => u.ativo && normalizar(`${u.nome} ${u.usuario}`).includes(termo));
+    opcoes = todos.slice(0, 8);
+    foco = Math.max(0, opcoes.findIndex((u) => ehUsuarioComum(u) && !u.solucoes.includes(sol.id)));
+    caixa.replaceChildren(...(opcoes.length ? opcoes.map((u, i) => {
+      const bloqueio = !ehUsuarioComum(u) ? "administrador: já acessa" : u.solucoes.includes(sol.id) ? "já tem acesso" : "";
+      return h("div", { role: "option", class: `${i === foco ? "foco" : ""}${bloqueio ? " desligada" : ""}`, "aria-selected": String(i === foco),
+        onmousedown: (ev) => { ev.preventDefault(); if (!bloqueio) adicionar(u); } },
+        avatar(u, "pequeno"), h("span", {}, u.nome), h("small", {}, u.usuario + (bloqueio ? ` · ${bloqueio}` : "")));
+    }) : [h("p", { class: "nota" }, "Ninguém encontrado.")]));
+    caixa.hidden = false;
+    campo.setAttribute("aria-expanded", "true");
   };
-  const atualizarContadores = () => {
-    for (const s of solucoes) {
-      if (s.somente_admin) continue;
-      const n = usuarios.filter((u) => u.ativo && u.perfil !== "admin" && u.solucoes.includes(s.id)).length;
-      contadores.get(s.id).textContent = plural(n, "pessoa", "pessoas");
-    }
-  };
-  const alternar = async (u, s, marcar, caixa) => {
-    caixa.disabled = true;
+  const adicionar = async (u) => {
     try {
-      await api("/api/acessos", { method: "POST", body: { usuarios: [u.id], solucoes: [s.id], conceder: marcar } });
-      if (marcar) u.solucoes.push(s.id); else u.solucoes = u.solucoes.filter((x) => x !== s.id);
-      atualizarContadores();
-    } catch (e) { caixa.checked = !marcar; toast(e.message, "erro"); }
-    caixa.disabled = false;
-  };
-  const emColuna = async (s, conceder) => {
-    const alvos = visiveis().filter((u) => u.ativo && u.perfil !== "admin" && u.solucoes.includes(s.id) !== conceder);
-    if (!alvos.length) { toast(conceder ? "Todas as pessoas listadas já têm acesso." : "Ninguém listado tem acesso."); return; }
-    if (!(await confirmar({
-      titulo: `${conceder ? "Liberar" : "Retirar"} ${s.nome}?`,
-      texto: `${conceder ? "Liberar para" : "Retirar de"} ${plural(alvos.length, "pessoa listada", "pessoas listadas")}`
-        + (estadoAcessos.busca ? ` (filtro: "${estadoAcessos.busca}")` : "") + ".",
-      botao: conceder ? "Liberar para todos" : "Retirar de todos", perigo: !conceder,
-    }))) return;
-    try {
-      await api("/api/acessos", { method: "POST", body: { usuarios: alvos.map((u) => u.id), solucoes: [s.id], conceder } });
-      for (const u of alvos) { if (conceder) u.solucoes.push(s.id); else u.solucoes = u.solucoes.filter((x) => x !== s.id); }
-      atualizarContadores(); pintarLinhas();
-      toast(`${conceder ? "Acesso liberado para" : "Acesso retirado de"} ${plural(alvos.length, "pessoa", "pessoas")}.`);
+      await mudarAcesso([u.id], [sol.id], true);
+      toast(`${sol.nome} liberado para ${u.nome}.`);
+      campo.value = "";
+      repintarAcessos();
+      document.querySelector(".adicionar input")?.focus();
     } catch (e) { toast(e.message, "erro"); }
   };
+  campo.addEventListener("input", pintarSugestoes);
+  campo.addEventListener("blur", () => setTimeout(() => { caixa.hidden = true; }, 120));
+  campo.addEventListener("keydown", (ev) => {
+    if (caixa.hidden || !opcoes.length) return;
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault();
+      foco = (foco + (ev.key === "ArrowDown" ? 1 : opcoes.length - 1)) % opcoes.length;
+      [...caixa.children].forEach((c, i) => { c.classList.toggle("foco", i === foco); c.setAttribute("aria-selected", String(i === foco)); });
+    } else if (ev.key === "Enter") {
+      ev.preventDefault();
+      const u = opcoes[foco];
+      if (u && ehUsuarioComum(u) && !u.solucoes.includes(sol.id)) adicionar(u);
+    } else if (ev.key === "Escape") { caixa.hidden = true; }
+  });
+  const botaoAdicionar = h("button", { type: "button", class: "botao primario", onclick: () => {
+    const u = opcoes[foco];
+    if (!caixa.hidden && u && ehUsuarioComum(u) && !u.solucoes.includes(sol.id)) adicionar(u);
+    else { campo.focus(); toast("Digite um nome e escolha a pessoa na lista."); }
+  } }, "Adicionar");
 
-  const pintarLinhas = () => {
-    const lista = visiveis();
-    corpo.replaceChildren(...lista.map((u) => h("tr", { class: u.ativo ? "" : "inativo" },
-      h("th", { scope: "row" }, h("div", { class: "pessoa" }, avatar(u, "pequeno"),
-        h("div", {}, h("span", { class: "pessoa-nome" }, u.nome), h("div", { class: "sub" }, u.usuario)))),
-      solucoes.map((s) => h("td", { class: "celula" }, u.perfil === "admin"
-        ? h("span", { class: "sempre", title: "Administradores acessam todos os sistemas" }, "Todos")
-        : s.somente_admin
-        ? h("span", { class: "so-admin", title: "Só administradores do portal abrem este sistema" }, "—")
-        : h("input", {
-            type: "checkbox", class: "marca-acesso", checked: u.solucoes.includes(s.id),
-            "aria-label": `${s.nome} para ${u.nome}`,
-            onchange: (ev) => alternar(u, s, ev.target.checked, ev.target),
-          }))))));
-    if (!lista.length) corpo.append(h("tr", {}, h("td", { colspan: String(solucoes.length + 1), class: "vazio-linha" }, "Ninguém encontrado.")));
-  };
+  // quem tem acesso
+  const quem = comAcesso(sol.id).sort((a, b) => (b.ativo - a.ativo) || a.nome.localeCompare(b.nome, "pt-BR"));
+  const termo = normalizar(estadoAcessos.filtroQuem);
+  const filtrados = quem.filter((u) => !termo || normalizar(`${u.nome} ${u.usuario}`).includes(termo));
+  const LIMITE = 50;
+  const mostrar = estadoAcessos.todos ? filtrados : filtrados.slice(0, LIMITE);
+  const corpo = h("tbody", {}, mostrar.map((u) => linhaPessoa(u, async () => {
+    try {
+      await mudarAcesso([u.id], [sol.id], false);
+      toast(`${sol.nome} retirado de ${u.nome}.`);
+      repintarAcessos();
+    } catch (e) { toast(e.message, "erro"); }
+  })));
+  const filtro = h("input", { type: "search", class: "busca", placeholder: "Filtrar quem tem acesso", "aria-label": "Filtrar quem tem acesso", value: estadoAcessos.filtroQuem,
+    oninput: (ev) => {
+      estadoAcessos.filtroQuem = ev.target.value;
+      const pos = ev.target.selectionStart;
+      repintarAcessos();
+      const novo = document.querySelector(".detalhe-acesso .filtro-quem input");
+      if (novo) { novo.focus(); novo.setSelectionRange(pos, pos); }
+    } });
 
-  const cabecalho = h("tr", {}, h("th", { class: "canto" }, "Pessoa"), solucoes.map((s) => {
-    const cont = h("small", {});
-    contadores.set(s.id, cont);
-    if (s.somente_admin) {
-      return h("th", { class: "col-sistema", scope: "col" },
-        h("div", { class: "col-sistema-topo" }, logoSistema(s, "mini"), h("span", {}, s.nome)),
-        h("small", {}, "Só administradores"));
+  return h("section", { class: "painel detalhe-acesso" }, cabeca,
+    h("div", { class: "adicionar" }, h("div", { class: "campo-busca" }, campo, caixa), botaoAdicionar),
+    h("p", { class: "atalhos" }, "Ou: ",
+      h("button", { type: "button", class: "link-acao", onclick: () => dialogoColarLista(sol) }, "colar uma lista de usuários"), " · ",
+      h("button", { type: "button", class: "link-acao", onclick: () => dialogoCopiarSistema(sol) }, "copiar o acesso de outro sistema"),
+      quem.length ? [" · ", h("button", { type: "button", class: "link-acao perigo", onclick: () => retirarTodos(sol, quem) }, "retirar de todos")] : null),
+    quem.length
+      ? [quem.length > 8 ? h("div", { class: "filtro-quem" }, filtro) : null,
+        h("table", { class: "tabela-pessoas" }, corpo),
+        !mostrar.length ? h("p", { class: "nota" }, "Ninguém encontrado com esse filtro.") : null,
+        filtrados.length > mostrar.length ? h("p", { class: "nota" }, `Mostrando ${mostrar.length} de ${filtrados.length}. `,
+          h("button", { type: "button", class: "link-acao", onclick: () => { estadoAcessos.todos = true; repintarAcessos(); } }, "Ver todas")) : null]
+      : h("p", { class: "nota" }, candidatos().length
+        ? "Ninguém tem acesso ainda (fora os administradores). Adicione as pessoas acima."
+        : "Nenhum usuário ativo para liberar. Crie as pessoas em Usuários."));
+}
+
+function linhaPessoa(u, retirar) {
+  return h("tr", { class: u.ativo ? "" : "inativo" },
+    h("td", {}, h("div", { class: "pessoa" }, avatar(u, "pequeno"),
+      h("div", {}, h("span", { class: "pessoa-nome" }, u.nome), h("div", { class: "sub" }, u.usuario)))),
+    h("td", { class: "sub" }, !u.ativo ? "Desativado (não entra no portal)"
+      : u.trocar_senha ? "Ainda não fez o primeiro acesso" : `Último acesso ao portal: ${quando(u.ultimo_login, true).toLowerCase()}`),
+    h("td", { class: "acao" }, retirar ? h("button", { type: "button", class: "link-retirar", onclick: retirar }, "Retirar") : null));
+}
+
+async function retirarTodos(sol, quem) {
+  if (!(await confirmar({ titulo: `Retirar ${sol.nome} de todos?`,
+    texto: `Retira o acesso de ${plural(quem.length, "pessoa", "pessoas")}. Os administradores continuam acessando.`,
+    botao: "Retirar de todos", perigo: true }))) return;
+  try {
+    await mudarAcesso(quem.map((u) => u.id), [sol.id], false);
+    toast(`Acesso retirado de ${plural(quem.length, "pessoa", "pessoas")}.`);
+    repintarAcessos();
+  } catch (e) { toast(e.message, "erro"); }
+}
+
+/** Cola usuários (um por linha, ou separados por vírgula/ponto e vírgula) e libera para todos de uma vez. */
+function dialogoColarLista(sol) {
+  const texto = h("textarea", { id: "cl-lista", rows: 8, spellcheck: false, placeholder: "ana.lima\nbruno.carvalho\nCarla Mendes" });
+  const previa = h("div", { class: "nota" });
+  const botao = h("button", { type: "button", class: "botao primario", disabled: true }, "Liberar");
+  let achados = [];
+  const analisar = () => {
+    const termos = [...new Set(texto.value.split(/[\n,;\t]+/).map((t) => t.trim()).filter(Boolean))];
+    const porUsuario = new Map(estadoUsuarios.dados.usuarios.map((u) => [u.usuario.toLowerCase(), u]));
+    const porNome = new Map(estadoUsuarios.dados.usuarios.map((u) => [normalizar(u.nome), u]));
+    achados = []; const naoAchados = []; const ignorados = [];
+    for (const t of termos) {
+      const u = porUsuario.get(t.toLowerCase()) || porNome.get(normalizar(t));
+      if (!u) naoAchados.push(t);
+      else if (!u.ativo || !ehUsuarioComum(u) || u.solucoes.includes(sol.id)) ignorados.push(`${u.usuario} (${!u.ativo ? "desativado" : !ehUsuarioComum(u) ? "administrador" : "já tem acesso"})`);
+      else if (!achados.includes(u)) achados.push(u);
     }
-    return h("th", { class: "col-sistema", scope: "col" },
-      h("div", { class: "col-sistema-topo" }, logoSistema(s, "mini"), h("span", {}, s.nome)),
-      cont,
-      h("div", { class: "col-sistema-acoes" },
-        h("button", { type: "button", class: "link-acao", onclick: () => emColuna(s, true) }, "Liberar todos"),
-        h("button", { type: "button", class: "link-acao", onclick: () => emColuna(s, false) }, "Retirar todos")));
-  }));
+    previa.replaceChildren(
+      termos.length ? h("p", {}, h("strong", {}, plural(achados.length, "pessoa recebe", "pessoas recebem")), " o acesso.") : null,
+      ignorados.length ? h("p", {}, `Ficam como estão: ${ignorados.join(", ")}.`) : null,
+      naoAchados.length ? h("p", { class: "form-erro" }, `Não encontrados no portal: ${naoAchados.join(", ")}. Crie em Usuários ou confira a grafia.`) : null);
+    botao.disabled = !achados.length;
+    botao.textContent = achados.length ? `Liberar para ${plural(achados.length, "pessoa", "pessoas")}` : "Liberar";
+  };
+  texto.addEventListener("input", analisar);
+  botao.addEventListener("click", async () => {
+    botao.disabled = true;
+    try {
+      await mudarAcesso(achados.map((u) => u.id), [sol.id], true);
+      dlg.close();
+      toast(`${sol.nome} liberado para ${plural(achados.length, "pessoa", "pessoas")}.`);
+      repintarAcessos();
+    } catch (e) { toast(e.message, "erro"); botao.disabled = false; }
+  });
+  const dlg = dialogo({ titulo: `Liberar ${sol.nome} para uma lista`, descricao: "Um usuário (ou nome completo) por linha, ou separados por vírgula. Dá para colar uma coluna do Excel.",
+    corpo: [h("div", { class: "campo" }, h("label", { for: "cl-lista" }, "Usuários"), texto), previa],
+    rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), botao] });
+}
 
-  alvo.replaceChildren(
-    h("div", { class: "barra-ferramentas" }, busca, inativos),
-    h("div", { class: "painel tabela-rolagem matriz-caixa" }, h("table", { class: "matriz" }, h("thead", {}, cabecalho), corpo)),
-    h("p", { class: "nota" }, "“Liberar todos” e “Retirar todos” valem para as pessoas ativas que aparecem na lista, respeitando a busca."
-      + (solucoes.some((s) => s.somente_admin) ? " Sistemas marcados “Só administradores” dão acesso total a bancos de dados: abrem só para administradores do portal e não podem ser liberados aqui." : "")));
-  atualizarContadores();
-  pintarLinhas();
+function dialogoCopiarSistema(sol) {
+  const outros = estadoUsuarios.dados.solucoes.filter((s) => s.id !== sol.id && !s.somente_admin);
+  const sel = h("select", { id: "cs-origem" }, outros.map((s) => h("option", { value: s.id }, `${s.nome} (${plural(comAcesso(s.id).filter((u) => u.ativo).length, "pessoa", "pessoas")})`)));
+  const previa = h("p", { class: "nota" });
+  const botao = h("button", { type: "button", class: "botao primario" }, "Liberar");
+  const novos = () => ativosComuns().filter((u) => u.solucoes.includes(sel.value) && !u.solucoes.includes(sol.id));
+  const atualizar = () => {
+    const n = novos().length;
+    previa.textContent = n ? `${plural(n, "pessoa que usa", "pessoas que usam")} o sistema escolhido e ainda não ${n === 1 ? "tem" : "têm"} ${sol.nome} ${n === 1 ? "vai receber" : "vão receber"} o acesso. Ninguém perde acesso.`
+      : `Todas as pessoas do sistema escolhido já têm ${sol.nome}.`;
+    botao.disabled = !n;
+    botao.textContent = n ? `Liberar para ${plural(n, "pessoa", "pessoas")}` : "Liberar";
+  };
+  sel.addEventListener("change", atualizar);
+  botao.addEventListener("click", async () => {
+    const lista = novos();
+    botao.disabled = true;
+    try {
+      await mudarAcesso(lista.map((u) => u.id), [sol.id], true);
+      dlg.close();
+      toast(`${sol.nome} liberado para ${plural(lista.length, "pessoa", "pessoas")}.`);
+      repintarAcessos();
+    } catch (e) { toast(e.message, "erro"); botao.disabled = false; }
+  });
+  const dlg = dialogo({ titulo: `Copiar o acesso de outro sistema para ${sol.nome}`,
+    corpo: outros.length ? [h("div", { class: "campo" }, h("label", { for: "cs-origem" }, "Quem usa este sistema"), sel), previa]
+      : h("p", { class: "nota" }, "Não há outro sistema para copiar."),
+    rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), outros.length ? botao : null] });
+  if (outros.length) atualizar();
+}
+
+/* ---- aba "Por pessoa" ---- */
+
+function pintarPorPessoa() {
+  const alvo = document.getElementById("acessos-corpo");
+  if (!alvo) return;
+  const { usuarios } = estadoUsuarios.dados;
+  const visiveis = () => {
+    const termo = normalizar(estadoAcessos.buscaPes);
+    return usuarios.filter((u) => (estadoAcessos.inativos || u.ativo) && (!termo || normalizar(`${u.nome} ${u.usuario}`).includes(termo)))
+      .sort((a, b) => (a.perfil === "admin") - (b.perfil === "admin") || (b.ativo - a.ativo) || a.nome.localeCompare(b.nome, "pt-BR"));
+  };
+  if (!usuarios.some((u) => u.id === estadoAcessos.pessoa)) {
+    estadoAcessos.pessoa = (visiveis().find(ehUsuarioComum) || usuarios[0])?.id ?? null;
+  }
+  const rolagemAntes = alvo.querySelector(".lista-lado-itens")?.scrollTop;
+  const itens = h("div", { class: "lista-lado-itens" });
+  const pintarLista = () => {
+    const lista = visiveis();
+    const comuns = lista.filter(ehUsuarioComum);
+    const adms = lista.filter((u) => !ehUsuarioComum(u));
+    const item = (u) => itemLado(u.id === estadoAcessos.pessoa, [
+      avatar(u, "pequeno"), h("span", { class: "nome" }, u.nome, h("span", { class: "sub" }, u.usuario + (u.ativo ? "" : " · desativado"))),
+      ehUsuarioComum(u) ? h("span", { class: "contador" }, plural(u.solucoes.length, "sistema", "sistemas")) : h("span", { class: "etiqueta-admin" }, "Todos")],
+      () => { estadoAcessos.pessoa = u.id; pintarPorPessoa(); });
+    itens.replaceChildren(
+      comuns.length ? h("div", { class: "grupo-titulo" }, `Pessoas · ${comuns.length}`) : null, ...comuns.map(item),
+      adms.length ? h("div", { class: "grupo-titulo" }, `Administradores · ${adms.length}`) : null, ...adms.map(item),
+      lista.length ? null : h("p", { class: "nota vazio-lado" }, "Ninguém encontrado."));
+  };
+  const busca = h("input", { type: "search", class: "busca", placeholder: "Procurar pessoa", "aria-label": "Procurar pessoa", value: estadoAcessos.buscaPes,
+    oninput: (ev) => { estadoAcessos.buscaPes = ev.target.value; pintarLista(); } });
+  const inativos = h("label", { class: "campo-check compacto" },
+    h("input", { type: "checkbox", checked: estadoAcessos.inativos, onchange: (ev) => { estadoAcessos.inativos = ev.target.checked; pintarLista(); } }),
+    h("span", {}, "Mostrar desativados"));
+  pintarLista();
+  const u = usuarios.find((x) => x.id === estadoAcessos.pessoa);
+  alvo.replaceChildren(h("div", { class: "duas-colunas" },
+    h("section", { class: "painel lista-lado", "aria-label": "Pessoas" }, h("div", { class: "busca-lado" }, busca, inativos), itens),
+    u ? detalhePessoa(u) : h("section", { class: "painel" }, h("p", { class: "nota" }, "Nenhuma pessoa cadastrada. Crie em Usuários."))));
+  manterRolagem(itens, rolagemAntes);
+}
+
+function detalhePessoa(u) {
+  const cabeca = h("div", { class: "cabeca-detalhe" }, avatar(u, "grande"),
+    h("div", {}, h("h2", {}, u.nome),
+      h("p", {}, [u.usuario, ehUsuarioComum(u) ? "usuário" : "administrador",
+        !u.ativo ? "desativado" : u.trocar_senha ? "ainda não fez o primeiro acesso" : `último acesso ${quando(u.ultimo_login, true).toLowerCase()}`].join(" · "))),
+    ehUsuarioComum(u) ? h("div", { class: "lado-direito" },
+      h("button", { type: "button", class: "botao", onclick: () => dialogoCopiarPessoa(u) }, "Copiar acessos de outra pessoa")) : null);
+  if (!ehUsuarioComum(u)) {
+    return h("section", { class: "painel detalhe-acesso" }, cabeca,
+      h("p", { class: "nota" }, "Administradores acessam todos os sistemas, inclusive os “só administradores”. Para limitar, mude o perfil para usuário em Usuários."));
+  }
+  const nomes = new Map(estadoUsuarios.dados.solucoes.map((s) => [s.id, s.nome]));
+  const resumo = u.solucoes.length
+    ? h("div", { class: "resumo-pessoa" }, u.solucoes.map((sid) => h("span", { class: "chip" }, nomes.get(sid) || sid)))
+    : h("p", { class: "nota" }, "Nenhum sistema liberado ainda.");
+  const grade = sistemasPorArea().map(([area, lista]) => h("div", { class: "area" }, h("h3", {}, area),
+    h("div", { class: "grade-sistemas" }, lista.map((s) => {
+      if (s.somente_admin) {
+        return h("div", { class: "cartao-sistema bloqueado", title: "Só administradores do portal abrem este sistema" },
+          logoSistema(s, "mini"), h("span", { class: "n" }, s.nome), h("span", { class: "etiqueta-admin" }, "Só administradores"));
+      }
+      const marcado = u.solucoes.includes(s.id);
+      const caixa = h("input", { type: "checkbox", checked: marcado, "aria-label": `${s.nome} para ${u.nome}` });
+      caixa.addEventListener("change", async () => {
+        caixa.disabled = true;
+        try {
+          await mudarAcesso([u.id], [s.id], caixa.checked);
+          toast(`${s.nome} ${caixa.checked ? "liberado para" : "retirado de"} ${u.nome}.`);
+          repintarAcessos();
+        } catch (e) { caixa.checked = !caixa.checked; caixa.disabled = false; toast(e.message, "erro"); }
+      });
+      return h("label", { class: `cartao-sistema${marcado ? " marcado" : ""}` }, caixa, logoSistema(s, "mini"), h("span", { class: "n" }, s.nome));
+    }))));
+  return h("section", { class: "painel detalhe-acesso" }, cabeca, resumo,
+    !u.ativo ? h("p", { class: "nota" }, "Pessoa desativada: não entra no portal. Os acessos ficam guardados para quando for reativada.") : null,
+    grade, h("p", { class: "nota" }, "Marcar ou desmarcar vale na hora e fica no histórico."));
+}
+
+/** Acrescenta a esta pessoa os sistemas de outra (ninguém perde acesso). */
+function dialogoCopiarPessoa(u) {
+  const outras = ativosComuns().filter((x) => x.id !== u.id && x.solucoes.length).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  const sel = h("select", { id: "cp-origem" }, outras.map((x) => h("option", { value: String(x.id) }, `${x.nome} (${x.usuario}) · ${plural(x.solucoes.length, "sistema", "sistemas")}`)));
+  const previa = h("div", { class: "nota" });
+  const botao = h("button", { type: "button", class: "botao primario" }, "Copiar");
+  // Só os sistemas que se liberam (os "só administradores" ficam de fora).
+  const nomes = new Map(estadoUsuarios.dados.solucoes.filter((s) => !s.somente_admin).map((s) => [s.id, s.nome]));
+  const novos = () => {
+    const origem = outras.find((x) => String(x.id) === sel.value);
+    return origem ? origem.solucoes.filter((s) => !u.solucoes.includes(s) && nomes.has(s)) : [];
+  };
+  const atualizar = () => {
+    const n = novos();
+    previa.replaceChildren(n.length
+      ? h("p", {}, `${u.nome} recebe: `, h("strong", {}, n.map((s) => nomes.get(s)).join(", ")), ". O que a pessoa já tem continua.")
+      : h("p", {}, `${u.nome} já tem todos os sistemas dessa pessoa.`));
+    botao.disabled = !n.length;
+  };
+  sel.addEventListener("change", atualizar);
+  botao.addEventListener("click", async () => {
+    const lista = novos();
+    botao.disabled = true;
+    try {
+      await mudarAcesso([u.id], lista, true);
+      dlg.close();
+      toast(`${plural(lista.length, "sistema liberado", "sistemas liberados")} para ${u.nome}.`);
+      repintarAcessos();
+    } catch (e) { toast(e.message, "erro"); botao.disabled = false; }
+  });
+  const dlg = dialogo({ titulo: `Copiar acessos para ${u.nome}`,
+    corpo: outras.length ? [h("div", { class: "campo" }, h("label", { for: "cp-origem" }, "Copiar os sistemas de"), sel), previa]
+      : h("p", { class: "nota" }, "Nenhuma outra pessoa com sistemas liberados."),
+    rodape: [h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"), outras.length ? botao : null] });
+  if (outras.length) atualizar();
 }
 
 async function pintarHistorico() {
