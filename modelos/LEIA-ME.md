@@ -71,4 +71,4 @@ CMD ["node", "server.js"]
 ```
 
 O Dockerfile completo da Central do Colaborador (build do frontend + backend, SQLite em volume,
-seed na primeira execução) está no repositório `yuri-central-colaborador`.
+seed na primeira execução) está no repositório `ProjetoLog20/Chatbot-rh-central-colabotador`.

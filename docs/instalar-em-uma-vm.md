@@ -11,8 +11,12 @@ pessoa por um canal seguro (não por e-mail aberto ou grupo):
 1. github.com → foto → **Settings → Developer settings → Personal access tokens →
    Fine-grained tokens → Generate new token**.
 2. **Token name:** o nome da VM (ex.: `vm-teste-maria`). **Expiration:** 30 ou 90 dias.
-3. **Repository access → Only select repositories:** `portal-solucoes-log20` e
-   `yuri-central-colaborador`.
+3. **Resource owner:** `ProjetoLog20`. **Repository access → Only select repositories:**
+   `portallog20` e `Chatbot-rh-central-colabotador`.
+   Atenção: um token fine-grained só enxerga os repositórios de **uma** conta. A Jornada da
+   Liderança (`Jornada-da-lideranca`) e o Orçamento OBZ (`log20-orcamento_obz`) ainda estão
+   na conta `JungGustavo`; enquanto não forem transferidos para a `ProjetoLog20`, o mesmo
+   `PORTAL_GIT_TOKEN` não instala esses dois e o Yuri na mesma VM.
 4. **Permissions → Repository permissions → Contents: Read-only.** Nada mais.
 5. **Generate token** e copie o valor (começa com `github_pat_`; só aparece uma vez).
 
@@ -38,12 +42,14 @@ ssh usuario-da-vm@IP-DA-VM
 ### 3. Baixar e instalar o portal
 
 ```bash
-git clone https://github.com/JungGustavo/portal-solucoes-log20.git
+git clone https://github.com/ProjetoLog20/portallog20.git portal-solucoes-log20
 cd portal-solucoes-log20
 bash deploy/preparar-vm.sh
 ```
 
-- No `git clone`: **Username** `JungGustavo`, **Password** = o token (colar; não aparece).
+- No `git clone`: **Username** = o seu usuário do GitHub, **Password** = o token (colar; não aparece).
+- O repositório se chama `portallog20` (conta `ProjetoLog20`); o comando acima baixa na pasta
+  `portal-solucoes-log20`, o nome usado no resto deste guia e nos scripts.
 - O script pede a senha da VM (sudo), instala o Docker, pede o **token de novo** (é o que o
   portal usa para baixar as soluções), sobe o portal e o Caddy.
 - Se ao final ele não pedir os dados do administrador, crie à mão:
@@ -99,7 +105,7 @@ e rode `bash deploy/atualizar.sh`. Detalhes no README, em **Backup e restauraç�
 | --- | --- |
 | `git clone` pede senha e recusa | Usar o **token** como senha, não a senha do GitHub. Conferir se ele não expirou. |
 | "You do not have the initial commit yet" no `git pull` | O clone ficou incompleto: renomear a pasta e clonar de novo (copiar o `.env` e `dados/` da antiga). |
-| Instalar falha com "Sem acesso ao repositório" | Token errado ou sem `yuri-central-colaborador`. Corrigir `PORTAL_GIT_TOKEN` no `.env` e rodar `sudo docker compose up -d`. |
+| Instalar falha com "Sem acesso ao repositório" | Token errado ou sem o repositório daquele sistema (ex.: `Chatbot-rh-central-colabotador`). Corrigir `PORTAL_GIT_TOKEN` no `.env` e rodar `sudo docker compose up -d`. |
 | Página "Sistema fora do ar" | A solução não foi instalada/iniciada ainda: **Soluções → Instalar e iniciar**. |
 | IP da VM mudou (Hyper-V *Default Switch* muda ao reiniciar o Windows) | Apagar o `.env` e rodar `bash deploy/preparar-vm.sh` de novo (pede o token outra vez). |
 | Ver o que está acontecendo | `sudo docker compose ps` e `sudo docker compose logs --tail 50 portal` |

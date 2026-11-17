@@ -28,7 +28,7 @@ publicada é a **Central do Colaborador (Yuri)**.
 Requisitos: Python 3.12, Git e Docker Desktop aberto.
 
 ```powershell
-git clone https://github.com/JungGustavo/portal-solucoes-log20.git
+git clone https://github.com/ProjetoLog20/portallog20.git portal-solucoes-log20
 cd portal-solucoes-log20
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -75,7 +75,7 @@ repositórios privados: [docs/instalar-em-uma-vm.md](docs/instalar-em-uma-vm.md)
    repositório do portal também for privado, inclua-o no token: ele serve para o clone abaixo.
 3. **Na VM** (pelo `ssh usuario@IP-DA-VM`):
    ```bash
-   git clone https://github.com/JungGustavo/portal-solucoes-log20.git
+   git clone https://github.com/ProjetoLog20/portallog20.git portal-solucoes-log20
    cd portal-solucoes-log20
    bash deploy/preparar-vm.sh
    ```
