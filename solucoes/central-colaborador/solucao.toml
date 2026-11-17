@@ -24,7 +24,7 @@ parado, atualizado ou removido.
 [build]
 # O portal clona este repositorio (branch "ref") e constroi a imagem com o Dockerfile da raiz.
 # Repositorio privado: defina PORTAL_GIT_TOKEN com um token de leitura.
-repositorio = "https://github.com/JungGustavo/yuri-central-colaborador.git"
+repositorio = "https://github.com/ProjetoLog20/Chatbot-rh-central-colabotador.git"
 ref = "main"
 dockerfile = "Dockerfile"
 imagem = "log20/central-colaborador:local"

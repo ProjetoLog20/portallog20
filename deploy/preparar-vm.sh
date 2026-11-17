@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepara uma VM/servidor Ubuntu para rodar o Portal de Solucoes LOG20.
 #
-#   git clone https://github.com/<usuario>/portal-solucoes-log20.git
+#   git clone https://github.com/ProjetoLog20/portallog20.git portal-solucoes-log20
 #   cd portal-solucoes-log20
 #   bash deploy/preparar-vm.sh                # detecta o IP sozinho
 #   bash deploy/preparar-vm.sh 192.168.0.50   # ou informe o IP que os usuarios vao usar

@@ -63,7 +63,7 @@ Se guardar dados, diga onde (ex.: SQLite em volume local ou banco PostgreSQL ext
 [build]
 # (obrigatorio) Repositorio Git por HTTPS, sem usuario/senha na URL.
 # Repositorio privado: o token de leitura do servidor (PORTAL_GIT_TOKEN) precisa incluir este repo.
-repositorio = "https://github.com/JungGustavo/NOME-DO-REPOSITORIO.git"  # <<TROCAR>>
+repositorio = "https://github.com/ProjetoLog20/NOME-DO-REPOSITORIO.git"  # <<TROCAR>>
 
 # Branch ou tag usado em "Instalar" e "Atualizar". Padrao: "main".
 ref = "main"
