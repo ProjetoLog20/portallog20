@@ -1025,3 +1025,6 @@ table:not(.matriz) thead th { font-size: 11.5px; text-transform: uppercase; lett
   .adicionar { flex-wrap: wrap; }
   .tabela-pessoas td:nth-child(2) { display: none; }
 }
+
+/* usuários: remover desativado */
+.botao.sutil.perigo-texto { color: var(--erro); }

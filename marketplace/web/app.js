@@ -1221,6 +1221,7 @@ function pintarBarraSelecao() {
       h("button", { type: "button", class: "botao pequeno", onclick: () => dialogoAcessoEmMassa(sel, false) }, "Retirar sistemas"),
       algumInativo ? h("button", { type: "button", class: "botao pequeno", onclick: () => mudarSituacao(sel, true) }, "Reativar") : null,
       algumAtivo ? h("button", { type: "button", class: "botao pequeno perigo", onclick: () => mudarSituacao(sel, false) }, "Desativar") : null,
+      algumInativo ? h("button", { type: "button", class: "botao pequeno perigo", onclick: () => removerUsuarios(sel) }, "Remover desativados") : null,
       h("button", { type: "button", class: "botao pequeno sutil", onclick: () => { estadoUsuarios.selecionados.clear(); pintarUsuarios(); } }, "Limpar seleção")));
 }
 
@@ -1265,6 +1266,28 @@ async function mudarSituacao(sel, ativo) {
     const r = await api("/api/usuarios/situacao", { method: "POST", body: { usuarios: alvos.map((u) => u.id), ativo } });
     if (r.erros.length) toast(`${r.alterados} alterado(s). Não foi possível: ${r.erros.join("; ")}`, "erro");
     else toast(`${plural(r.alterados, "usuário", "usuários")} ${ativo ? "reativado(s)" : "desativado(s)"}.`);
+    await carregarUsuarios(); pintarUsuarios();
+  } catch (e) { toast(e.message, "erro"); }
+}
+
+/** Remove de vez os desativados da seleção (os ativos ficam: é preciso desativar antes). */
+async function removerUsuarios(sel) {
+  const alvos = sel.filter((u) => !u.ativo);
+  const ativos = sel.length - alvos.length;
+  if (!alvos.length) return;
+  const nomesLista = alvos.slice(0, 8).map((u) => u.nome).join(", ") + (alvos.length > 8 ? ` e mais ${alvos.length - 8}` : "");
+  if (!(await confirmar({
+    titulo: `Remover ${plural(alvos.length, "usuário desativado", "usuários desativados")}?`,
+    texto: `${nomesLista}. O cadastro e os acessos liberados são apagados de vez e não dá para desfazer. `
+      + "O histórico de alterações continua mostrando o que essas pessoas fizeram, e o login fica livre para ser cadastrado de novo."
+      + (ativos ? ` ${plural(ativos, "usuário ativo selecionado não é removido", "usuários ativos selecionados não são removidos")}: desative antes.` : ""),
+    botao: `Remover ${plural(alvos.length, "usuário", "usuários")}`, perigo: true,
+  }))) return;
+  try {
+    const r = await api("/api/usuarios/remover", { method: "POST", body: { usuarios: alvos.map((u) => u.id) } });
+    for (const u of alvos) estadoUsuarios.selecionados.delete(u.id);
+    if (r.erros.length) toast(`${plural(r.removidos, "removido", "removidos")}. Não foi possível: ${r.erros.join("; ")}`, "erro");
+    else toast(`${plural(r.removidos, "usuário removido", "usuários removidos")}.`);
     await carregarUsuarios(); pintarUsuarios();
   } catch (e) { toast(e.message, "erro"); }
 }
@@ -1328,7 +1351,10 @@ function dialogoUsuario(u) {
     descricao: novo ? "O usuário recebe uma senha temporária e cria a própria senha no primeiro acesso." : `Criado em ${quando(u.criado_em, true)} · último acesso: ${quando(u.ultimo_login)}`,
     corpo: form,
     rodape: [
-      redefinir, h("span", { class: "espaco" }),
+      redefinir,
+      !novo && !u.ativo ? h("button", { type: "button", class: "botao sutil perigo-texto",
+        onclick: () => { dlg.close(); removerUsuarios([u]); } }, "Remover") : null,
+      h("span", { class: "espaco" }),
       h("button", { type: "button", class: "botao", onclick: () => dlg.close() }, "Cancelar"),
       h("button", { type: "submit", form: "form-usuario", class: "botao primario" }, novo ? "Criar usuário" : "Salvar alterações"),
     ],

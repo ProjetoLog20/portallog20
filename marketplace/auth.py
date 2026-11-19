@@ -382,6 +382,26 @@ class Autenticacao:
             db.execute(f"DELETE FROM acessos WHERE solucao_id IN ({marcas})", list(solucoes))
         return pares
 
+    def remover_inativos(self, uids: list[int], autor: Usuario) -> tuple[list[str], list[str]]:
+        """Apaga de vez usuarios DESATIVADOS (com as sessoes e os acessos deles). O historico
+        continua citando o login como texto. Devolve (removidos, recusados com o motivo)."""
+        removidos, recusados = [], []
+        with self._db() as db:
+            for uid in dict.fromkeys(uids):
+                row = db.execute("SELECT usuario, ativo FROM usuarios WHERE id = ?", (uid,)).fetchone()
+                if row is None:
+                    continue
+                if uid == autor.id:
+                    recusados.append(f"{row['usuario']}: você não pode remover a si mesmo")
+                elif row["ativo"]:
+                    recusados.append(f"{row['usuario']}: está ativo (desative antes de remover)")
+                else:
+                    db.execute("DELETE FROM sessoes WHERE usuario_id = ?", (uid,))
+                    db.execute("DELETE FROM acessos WHERE usuario_id = ?", (uid,))
+                    db.execute("DELETE FROM usuarios WHERE id = ?", (uid,))
+                    removidos.append(row["usuario"])
+        return removidos, recusados
+
     def nomes(self, uids: list[int]) -> dict[int, str]:
         if not uids:
             return {}
