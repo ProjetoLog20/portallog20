@@ -1023,6 +1023,16 @@ def api_situacao_lote(
     return {"alterados": len(alterados), "erros": erros}
 
 
+@app.post("/api/usuarios/remover")
+def api_remover_usuarios(usuarios: list[int] = Body(..., embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
+    """Remove de vez usuarios desativados (ativos sao recusados: desative antes). O login fica
+    livre para ser cadastrado de novo; o historico continua citando o login."""
+    removidos, recusados = AUTH.remover_inativos(usuarios, autor)
+    if removidos:
+        AUTH.registrar(autor, "Removeu usuários", _lista_curta(removidos))
+    return {"removidos": len(removidos), "erros": recusados}
+
+
 # ---------------- administracao: acessos ----------------
 
 @app.post("/api/acessos")
