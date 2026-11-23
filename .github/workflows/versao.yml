@@ -1,0 +1,58 @@
+# Cria a Release de uma versão com as notas geradas a partir dos PRs incluídos.
+#
+# Duas formas:
+#   1. Pelo Git: git tag v1.4.0 && git push origin v1.4.0
+#   2. Pela tela: aba Actions → Versão → Run workflow → informar a versão (ex.: v1.4.0).
+#      A tag é criada no último commit da main.
+#
+# As notas listam os PRs desde a versão anterior, separados como em .github/release.yml.
+name: Versão
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Versão no formato v1.2.3"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Criar a Release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Conferir a versão
+        id: versao
+        env:
+          VERSAO_INFORMADA: ${{ inputs.versao }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            versao="$VERSAO_INFORMADA"
+          else
+            versao="$GITHUB_REF_NAME"
+          fi
+          if ! printf '%s' "$versao" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Versão inválida: '$versao'. Use o formato v1.2.3."
+            exit 1
+          fi
+          echo "versao=$versao" >> "$GITHUB_OUTPUT"
+
+      - name: Criar a Release com as notas
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSAO: ${{ steps.versao.outputs.versao }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            # Pela tela: a tag ainda não existe e é criada na main.
+            gh release create "$VERSAO" --repo "$GITHUB_REPOSITORY" --target main \
+              --title "$VERSAO" --generate-notes
+          else
+            # Pelo Git: a tag já foi enviada.
+            gh release create "$VERSAO" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$VERSAO" --generate-notes
+          fi

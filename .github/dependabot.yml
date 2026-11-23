@@ -1,0 +1,69 @@
+# Dependabot: abre PRs de atualização das dependências, uma vez por mês, agrupadas.
+# Os alertas de falhas de segurança são ligados em Settings → Advanced Security
+# (Dependabot alerts) e não dependem deste arquivo.
+#
+# Fora do alcance do Dependabot: as imagens do Supabase (IMAGENS em marketplace/supabase.py)
+# e as imagens que o portal usa por código. Essas continuam sendo atualizadas à mão.
+version: 2
+
+updates:
+  # Bibliotecas Python do portal (requirements.txt).
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+      time: "07:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
+    groups:
+      python:
+        patterns: ["*"]
+
+  # Imagens base dos Dockerfiles
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /solucoes/orcamento-obz
+      - /solucoes/pgadmin/imagem
+    schedule:
+      interval: monthly
+      time: "07:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      imagens:
+        patterns: ["*"]
+
+  # Imagens do docker-compose.yml (Caddy e PostgreSQL), sem troca de versão principal.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: monthly
+      time: "07:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Versões das ações usadas em .github/workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      time: "07:00"
+      timezone: America/Sao_Paulo
+    commit-message:
+      prefix: "deps"
+    groups:
+      acoes:
+        patterns: ["*"]

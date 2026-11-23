@@ -1,0 +1,7 @@
+# Como as notas de versão (Release → "Generate release notes") separam os PRs.
+changelog:
+  categories:
+    - title: Dependências
+      labels: [dependencies]
+    - title: Mudanças
+      labels: ["*"]
