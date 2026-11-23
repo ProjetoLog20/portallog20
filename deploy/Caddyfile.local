@@ -2,10 +2,9 @@
 #
 #   Portal ......................... http://localhost:8000  (python -m marketplace)
 #   Central do Colaborador ......... http://localhost:9101  -> container na porta 8101
-#   Central do Colaborador (homol.)  http://localhost:9102  -> container na porta 8102
 #
 # Os cookies valem para o endereco (localhost) sem olhar a porta, entao a sessao aberta
-# no portal tambem chega ao Caddy nas portas 9101 e 9102. No servidor funciona igual,
+# no portal tambem chega ao Caddy na porta 9101. No servidor funciona igual,
 # com o Caddy rodando la e os usuarios acessando http://<ip-do-servidor>:9101.
 #
 # Antes de cada pedido, o Caddy pergunta ao portal (/api/auth/verificar) se a pessoa
@@ -20,17 +19,6 @@
 		copy_headers X-Portal-Usuario
 	}
 	reverse_proxy 127.0.0.1:8101 {
-		# Nao repassa a sessao do portal para a solucao.
-		header_up Cookie "(^|; *)portal_sessao=[^;]*;? *" "$1"
-	}
-}
-
-:9102 {
-	forward_auth 127.0.0.1:8000 {
-		uri /api/auth/verificar?solucao=central-colaborador-homologacao
-		copy_headers X-Portal-Usuario
-	}
-	reverse_proxy 127.0.0.1:8102 {
 		# Nao repassa a sessao do portal para a solucao.
 		header_up Cookie "(^|; *)portal_sessao=[^;]*;? *" "$1"
 	}

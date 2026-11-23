@@ -9,6 +9,7 @@ categoria = "Infraestrutura"
 versao = "9"
 responsavel = "TI LOG20"
 tags = ["banco", "postgres", "admin"]
+logo = "logo.jpg"
 somente_admin = true
 descricao = """
 pgAdmin já configurado com o PostgreSQL do servidor, onde ficam os bancos das soluções

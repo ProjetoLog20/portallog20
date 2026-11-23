@@ -11,6 +11,7 @@ categoria = "Infraestrutura"
 versao = "2.0.0"
 responsavel = "Administradores do portal"
 tags = ["banco", "supabase", "administracao"]
+logo = "logo.png"
 requer = "supabase"
 somente_admin = true
 descricao = """
