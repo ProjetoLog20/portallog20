@@ -550,6 +550,25 @@ topo da tela de Soluções, e o acesso às soluções que já estavam no ar cont
 | `[banco]` + `[banco.configuracoes]` | Banco no PostgreSQL do servidor: qual configuração recebe cada dado (`{db_host}`, `{db_porta}`, `{db_nome}`, `{db_usuario}`, `{db_senha}` ou `{db_url}`) |
 | `[[acessos_demo]]` | Usuários de teste exibidos ao admin |
 
+## Automações do GitHub
+
+Ficam em `.github/` e rodam sozinhas no GitHub (aba **Actions**):
+
+- **Conferência** (`.github/workflows/conferencia.yml`): em cada pull request e em cada push na
+  `main`, confere a sintaxe do Python e do JavaScript, os manifestos das soluções
+  (`python -m marketplace validar`), os scripts shell (shellcheck) e, quando existir a pasta
+  `tests/`, roda os testes. O resultado aparece no PR (✔ ou ✖) antes do merge.
+- **Versão** (`.github/workflows/versao.yml`): cria a Release com as notas geradas a partir dos
+  PRs. Pelo Git (`git tag v1.4.0 && git push origin v1.4.0`) ou pela tela (Actions → Versão →
+  Run workflow → informar `v1.4.0`; a tag é criada na `main`).
+- **Dependabot** (`.github/dependabot.yml`): uma vez por mês, abre PRs agrupados com as
+  atualizações das bibliotecas Python, das imagens base dos Dockerfiles e do
+  `docker-compose.yml` (sem trocar versão principal) e das ações do GitHub. As imagens do
+  Supabase (`IMAGENS` em `marketplace/supabase.py`) ficam de fora e são atualizadas à mão.
+
+Os alertas de falhas de segurança das dependências são ligados no repositório, em
+Settings → Advanced Security → **Dependabot alerts**.
+
 ## Comandos úteis
 
 ```powershell
