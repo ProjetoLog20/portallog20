@@ -56,7 +56,6 @@ portas próprias, então só abrem para quem está logado no portal e tem acesso
 ```
 navegador ──► :8000  portal ──────────────┐ constrói e inicia as soluções
           └─► :8101  Caddy ─(pergunta ao portal)─► log20-central-colaborador:4000
-              :8102  Caddy ──────────────────────► log20-central-colaborador-homologacao:4000
 ```
 
 ### Testar numa VM
@@ -156,11 +155,10 @@ precisa de domínio nem de certificado:
 | Endereço protegido | Solução | Porta interna |
 | --- | --- | --- |
 | `http://localhost:9101` | Central do Colaborador | 8101 |
-| `http://localhost:9102` | Central do Colaborador - Homologação | 8102 |
 
 1. Instale o Caddy: `winget install -e --id CaddyServer.Caddy` (feche e reabra o terminal).
 2. Em **Soluções → Gerenciar → Acesso → Endereço público**, informe `http://localhost:9101`
-   na Central e `http://localhost:9102` na Homologação, e clique em **Reiniciar** em cada uma
+   na Central e clique em **Reiniciar**
    (o endereço entra na configuração da aplicação).
 3. Com o portal rodando, em outro terminal na pasta `portal`:
    `caddy run --config deploy/Caddyfile.local`
@@ -170,7 +168,7 @@ entre com um usuário sem acesso à Central (vê "Acesso não liberado"); entre 
 liberado (abre a Central).
 
 No servidor, rode o Caddy na mesma máquina, defina `PORTAL_URL_PUBLICA=http://<ip>:8000` e
-use `http://<ip>:9101` como endereço público. As portas 8101/8102 ficam só em `127.0.0.1`
+use `http://<ip>:9101` como endereço público. As portas internas (8101 em diante) ficam só em `127.0.0.1`
 (`PORTAL_BIND_SOLUCOES=127.0.0.1`), então de fora só se chega pelo Caddy.
 
 ## Variáveis de ambiente
