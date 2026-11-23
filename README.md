@@ -414,7 +414,9 @@ Cada alerta tem início e fim (histórico de 180 dias). O aviso por **e-mail** s
 quando resolve (com a duração) e, enquanto continuar, a cada 12 h. Tudo isso, os limites e os
 tipos ligados ficam em **Alertas → Ajustes**. O servidor de e-mail pode ser preenchido ali, ser o
 do `.env` (`SUPABASE_SMTP_*`) ou o mesmo do login de um sistema; **Enviar e-mail de teste**
-confere antes de salvar. A senha fica em `dados/alertas.json` (só o portal lê) e não volta para
+confere antes de salvar. **Enviar situação atual por e-mail** (no topo da tela) manda na hora,
+para os destinatários salvos, os alertas ativos, o estado de cada sistema, o espaço em disco e o
+último backup. A senha fica em `dados/alertas.json` (só o portal lê) e não volta para
 a tela.
 
 Para não alertar à toa, o vigia espera: nos 10 primeiros minutos depois que o portal sobe,

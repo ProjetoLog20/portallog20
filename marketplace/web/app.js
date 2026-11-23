@@ -3002,9 +3002,12 @@ async function telaAlertas() {
   estadoAlertas.dados = await api("/api/alertas");
   const abas = [["alertas", "Alertas"], ["ajustes", "Ajustes"]];
   $conteudo.replaceChildren(
-    h("section", { class: "intro" },
-      h("h1", {}, "Alertas"),
-      h("p", {}, "O portal confere a saúde do servidor a cada minuto e avisa os administradores quando algo dá errado.")),
+    h("section", { class: "intro intro-linha" },
+      h("div", {}, h("h1", {}, "Alertas"),
+        h("p", {}, "O portal confere a saúde do servidor a cada minuto e avisa os administradores quando algo dá errado.")),
+      h("div", { class: "intro-lado" },
+        h("button", { type: "button", class: "botao", onclick: enviarSituacao,
+          title: "Alertas ativos, estado de cada sistema, espaço em disco e último backup" }, "Enviar situação atual por e-mail"))),
     h("div", { id: "alertas-aviso" }),
     h("div", { class: "abas", role: "tablist" }, abas.map(([k, rotulo]) =>
       h("button", { type: "button", role: "tab", "aria-selected": String(estadoAlertas.aba === k),
@@ -3013,6 +3016,19 @@ async function telaAlertas() {
   pintarAvisoAlertas();
   if (estadoAlertas.aba === "ajustes") pintarAjustesAlertas();
   else pintarListaAlertas();
+}
+
+async function enviarSituacao(ev) {
+  const botao = ev.currentTarget;
+  const para = estadoAlertas.dados?.ajustes.email_para || [];
+  if (!para.length) { toast("Informe os destinatários em Ajustes → E-mail e salve.", "erro"); return; }
+  if (!(await confirmar({ titulo: "Enviar a situação atual?",
+    texto: `Um e-mail agora para ${para.join(", ")}, com os alertas ativos, o estado de cada sistema, o espaço em disco e o último backup.`,
+    botao: "Enviar" }))) return;
+  botao.disabled = true;
+  try { toast((await api("/api/alertas/enviar-situacao", { method: "POST" })).mensagem); }
+  catch (e) { toast(e.message, "erro"); }
+  botao.disabled = false;
 }
 
 async function atualizarAlertas() {

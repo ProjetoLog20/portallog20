@@ -51,6 +51,8 @@ INICIO_TOLERANCIA_S = 10 * 60      # depois que o portal sobe, os sistemas ainda
 INICIANDO_TOLERANCIA_S = 10 * 60   # "iniciando" so vira alerta depois disso
 SINCRONIZANDO_MAX_S = 3 * 3600     # marca do sincronizar esquecida (processo morto) deixa de valer
 JANELA_REINICIOS_S = 30 * 60
+ROTULOS_ESTADO = {"rodando": "no ar", "iniciando": "iniciando", "ocupado": "em andamento", "instalado": "instalado, parado",
+                  "parado": "parado", "nao_instalado": "não instalado", "com_problema": "COM PROBLEMA"}
 MARCA_SINCRONIZANDO = "sincronizando"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SMTP_HOST_RE = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
@@ -513,6 +515,86 @@ class Alertas:
         elif tipo_aviso != "teste":
             self.erro_envio = ""
         return erros
+
+    def situacao(self) -> tuple[str, str]:
+        """Assunto e texto do e-mail "situacao atual": alertas ativos, sistemas, disco e backup."""
+        agora = int(time.time())
+        aj = self.ajustes()
+        ativos = self.ativos()
+        def data(ts: float) -> str:
+            return datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M")
+        partes = [f"Situação do servidor em {data(agora)}.", ""]
+
+        partes.append(f"ALERTAS ATIVOS ({len(ativos)})")
+        if ativos:
+            for a in ativos:
+                partes.append(f"- {a['titulo']} (há {_duracao(agora - a['inicio'])}, desde {data(a['inicio'])})")
+                partes.append(f"  {a['detalhe']}")
+        else:
+            partes.append("- Nenhum.")
+        if not aj.ativo:
+            partes.append("  Atenção: os alertas estão desligados (Alertas → Ajustes).")
+        partes.append("")
+
+        partes.append("SISTEMAS")
+        ger = self._ger()
+        for sol in sorted(ger.solucoes.values(), key=lambda s: s.nome.lower()):
+            try:
+                st = ger.status(sol)
+                partes.append(f"- {sol.nome}: {ROTULOS_ESTADO.get(st['estado'], st['estado'])}"
+                              + (f" ({st['detalhe']})" if st["estado"] == "com_problema" else ""))
+            except Exception as exc:  # noqa: BLE001 - um sistema com erro nao impede o resto
+                partes.append(f"- {sol.nome}: não foi possível conferir ({exc})")
+        partes.append("")
+
+        partes.append("DISCO")
+        vistos: set[int] = set()
+        for rotulo, pasta in (("Portal", RAIZ), ("Backups", self._backups.pasta)):
+            try:
+                dev = os.stat(pasta).st_dev
+                uso = shutil.disk_usage(pasta)
+            except OSError as exc:
+                partes.append(f"- {rotulo} ({pasta}): não foi possível ler ({exc})")
+                continue
+            if dev in vistos:
+                continue
+            vistos.add(dev)
+            pct = uso.free / uso.total * 100 if uso.total else 0
+            partes.append(f"- {rotulo} ({pasta}): {_tamanho(uso.free)} livres de {_tamanho(uso.total)} ({pct:.0f}%)")
+        partes.append("")
+
+        partes.append("BACKUP")
+        e = self._backups.estado()
+        ajb = self._backups.ajustes()
+        sucesso = _data(e.get("ultimo_sucesso_em"))
+        partes.append(f"- Último completo: {data(sucesso) if sucesso else 'nenhum ainda'}")
+        if e.get("ultimo"):
+            partes.append(f"- Último feito: {e['ultimo']} " + ("(sem erros)" if e.get("ultimo_ok") else
+                          "(com erros: " + "; ".join(e.get("ultimo_erros") or [])[:400] + ")"))
+        partes.append(f"- Automático: {'ligado, às ' + ', '.join(ajb.horarios) if ajb.ativo else 'DESLIGADO'}")
+        if self.cfg.backup_copia is None:
+            partes.append("- Segunda cópia: não configurada")
+        else:
+            partes.append(f"- Segunda cópia: {'ligada' if ajb.copiar else 'desligada'}, em {self.cfg.backup_copia}")
+
+        assunto = (f"Situação atual: {len(ativos)} alerta(s) ativo(s)" if ativos else "Situação atual: nenhum alerta ativo")
+        portal = self.cfg.url_publica or self.cfg.url_base
+        return f"[Portal LOG20] {assunto}", "\n".join(partes) + f"\n\nPortal: {portal}/#/admin/alertas\n"
+
+    def enviar_situacao(self) -> str:
+        """Envia agora o e-mail com a situacao atual para os destinatarios salvos nos ajustes."""
+        aj = self.ajustes()
+        if not aj.email_para:
+            raise ErroAlertas("Informe os destinatários em Alertas → Ajustes → E-mail e salve.")
+        smtp = self.smtp(aj)
+        if smtp is None:
+            raise ErroAlertas("Nenhum servidor de e-mail configurado (Alertas → Ajustes → E-mail).")
+        assunto, corpo = self.situacao()
+        try:
+            correio.enviar(smtp, aj.email_para, assunto, corpo)
+        except correio.ErroCorreio as exc:
+            raise ErroAlertas(str(exc)) from None
+        return "Situação atual enviada para " + ", ".join(aj.email_para) + "."
 
     def testar(self, dados: dict) -> str:
         """Envia um e-mail de teste com os valores da tela (ainda sem salvar)."""

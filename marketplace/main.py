@@ -1089,6 +1089,17 @@ def api_alertas_ajustes(ajustes: dict = Body(..., embed=True), autor: Usuario = 
     return {"ok": True, "ajustes": aj.publico()}
 
 
+@app.post("/api/alertas/enviar-situacao")
+def api_alertas_enviar_situacao(autor: Usuario = Depends(exigir_admin)) -> dict:
+    """E-mail agora com a situacao atual (alertas ativos, sistemas, disco e backup)."""
+    try:
+        mensagem = ALERTAS.enviar_situacao()
+    except ErroAlertas as exc:
+        raise HTTPException(400, str(exc)) from exc
+    AUTH.registrar(autor, "Enviou a situação atual por e-mail", ", ".join(ALERTAS.ajustes().email_para))
+    return {"ok": True, "mensagem": mensagem}
+
+
 @app.post("/api/alertas/testar")
 def api_alertas_testar(ajustes: dict = Body(..., embed=True), _: Usuario = Depends(exigir_admin)) -> dict:
     """Envia um e-mail de teste com os valores da tela (sem salvar)."""
