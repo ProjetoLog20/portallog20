@@ -492,6 +492,8 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
                     c.avisos.append(f"Regras dos arquivos: {exc}")
             c.registrar(f"Arquivos: {len(regras)} regra(s) de acesso.")
 
+        if partes["tabelas"] or partes["usuarios"]:
+            _analisar(c, banco)
         banco.local_sql("notify pgrst, 'reload schema';", transacao=False)
 
         if partes["arquivos"]:
@@ -516,6 +518,17 @@ def _rodar(c: Copia, nome: str, origem: Origem, partes: dict[str, bool], pasta_d
     finally:
         c.etapa = ""
         c.fim = time.time()
+
+
+def _analisar(c: Copia, banco: _Banco) -> None:
+    """ANALYZE no banco inteiro: o pg_restore e a copia dos usuarios nao atualizam as estatisticas,
+    e sem elas o Postgres pode escolher planos ruins (consultas lentas ou em ordem diferente)."""
+    c.etapa = "Atualizando as estatísticas do banco (ANALYZE)"
+    try:
+        banco.local_sql("analyze;", transacao=False)
+        c.registrar("Estatísticas do banco atualizadas (ANALYZE).")
+    except ErroCopia as exc:
+        c.avisos.append(f"ANALYZE: {exc}. Rode \"analyze;\" no SQL Editor do Studio.")
 
 
 def _ligar_extensoes(c: Copia, banco: _Banco) -> None:

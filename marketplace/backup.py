@@ -943,6 +943,12 @@ class Backups:
         tmp = f"{banco[:50]}_restaurando"
         registrar(f"Restaurando o banco {banco} (primeiro num banco temporario)")
         tabelas = self._restaurar_em(pg, arq, tmp, dono=dono, manter=True, formato=formato)
+        # pg_restore/psql nao atualizam as estatisticas: sem ANALYZE, os planos das consultas ficam ruins.
+        ok, saida = docker_cli.executar_em(
+            pg, ["psql", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", tmp, "-tAc", "ANALYZE"], timeout=3600)
+        # Sem estatisticas o banco funciona: a falha do ANALYZE so vira aviso no registro.
+        registrar("  estatisticas do banco atualizadas (ANALYZE)" if ok
+                  else f"  aviso: ANALYZE nao foi possivel ({saida[-200:]}); rode ANALYZE no banco {banco}")
         registrar(f"  {tabelas} tabela(s) restaurada(s); trocando pelo banco atual")
         _psql(pg, f"DROP DATABASE IF EXISTS {banco} WITH (FORCE)")
         _psql(pg, f"ALTER DATABASE {tmp} RENAME TO {banco}")

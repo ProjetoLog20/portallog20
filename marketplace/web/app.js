@@ -877,7 +877,7 @@ async function dialogoCopiarSupabase(sol) {
     h("label", { for: id }, rotulo), h("input", { id, autocomplete: "off", spellcheck: false, ...extra }), ajuda ? h("small", {}, ajuda) : null);
   const marca = (nome, rotulo, ajuda, marcado = true) => h("label", { class: "campo-check" },
     h("input", { type: "checkbox", name: nome, checked: marcado }), h("span", {}, h("strong", {}, rotulo), h("small", {}, ` ${ajuda}`)));
-  const blocoArquivos = h("div", { class: "form-grade", hidden: true },
+  const blocoArquivos = h("div", { class: "form-grade" },
     campo("cp-url", "Endereço do projeto de origem", { type: "text", placeholder: "https://<id>.supabase.co" }, "Em branco: obtido do usuário (postgres.<id>)."),
     campo("cp-chave", "Chave de serviço da origem", { type: "password" }, "Project Settings → API Keys: service_role (ou secret)."));
   const form = h("form", { id: "form-copiar", class: "config" },
@@ -894,7 +894,7 @@ async function dialogoCopiarSupabase(sol) {
       marca("tabelas", "Tabelas e dados", "Esquema public inteiro: tabelas, dados, funções, gatilhos e regras (RLS)."),
       marca("usuarios", "Usuários do login", "Com as mesmas senhas. Devem ser copiadas junto com as tabelas."),
       marca("storage", "Buckets e regras dos arquivos", "Os buckets e quem pode ler e salvar em cada um."),
-      marca("arquivos", "Arquivos", "Baixa cada arquivo da origem. Precisa da chave de serviço da origem.", false)),
+      marca("arquivos", "Arquivos", "Baixa cada arquivo da origem. Precisa da chave de serviço da origem.")),
     blocoArquivos,
     campo("cp-confirma", `Para confirmar, digite ${sol.id}`, { type: "text", required: true }));
   form.querySelector("[name=arquivos]").addEventListener("change", (ev) => {

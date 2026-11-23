@@ -59,6 +59,9 @@ ROTULOS = {"db": "banco", "auth": "login", "rest": "API de dados", "realtime": "
 APELIDO_REALTIME = "realtime-dev.supabase-realtime"
 STUDIO = "log20-sb-studio"
 PORTA_GATEWAY = 8000
+# Maximo de linhas por resposta da API (PostgREST). Os sistemas paginam com .range() em blocos
+# maiores que 1000 (o Panorama usa 10000): com o padrao 1000, as paginas voltavam cortadas.
+MAX_LINHAS_API = "1000000"
 ANOS_CHAVES = 10
 # Caminhos da API do Supabase que os sistemas usam pelo navegador (dados, login e arquivos).
 CAMINHOS_API = ("/rest/v1/*", "/auth/v1/*", "/storage/v1/*", "/realtime/v1/*")
@@ -351,7 +354,7 @@ def especificacao(sid: str, seg: Segredos, url: str, realtime: bool = False,
         # A imagem do PostgREST nao tem shell: sem health check (o gateway so sobe depois).
         Servico("rest", c("rest"), IMAGENS["rest"], apelidos=["rest"],
                 env={"PGRST_DB_URI": f"postgres://authenticator:{senha}@db:5432/postgres",
-                     "PGRST_DB_SCHEMAS": esquemas, "PGRST_DB_MAX_ROWS": "1000", "PGRST_DB_EXTRA_SEARCH_PATH": "public",
+                     "PGRST_DB_SCHEMAS": esquemas, "PGRST_DB_MAX_ROWS": MAX_LINHAS_API, "PGRST_DB_EXTRA_SEARCH_PATH": "public",
                      "PGRST_DB_ANON_ROLE": "anon", "PGRST_ADMIN_SERVER_PORT": "3001",
                      "PGRST_ADMIN_SERVER_HOST": "localhost", "PGRST_JWT_SECRET": seg.jwt_secret,
                      "PGRST_DB_USE_LEGACY_GUCS": "false", "PGRST_APP_SETTINGS_JWT_EXP": jwt_exp},
@@ -406,7 +409,7 @@ def especificacao_studio(sid: str, nome: str, seg: Segredos, url: str) -> Servic
         env={"HOSTNAME": "0.0.0.0", "STUDIO_PG_META_URL": "http://meta:8080", "POSTGRES_HOST": "db",
              "POSTGRES_PORT": "5432", "POSTGRES_DB": "postgres", "POSTGRES_PASSWORD": seg.senha_banco,
              "POSTGRES_USER_READ_WRITE": "postgres", "PG_META_CRYPTO_KEY": seg.meta_chave,
-             "PGRST_DB_SCHEMAS": "public,graphql_public", "PGRST_DB_MAX_ROWS": "1000",
+             "PGRST_DB_SCHEMAS": "public,graphql_public", "PGRST_DB_MAX_ROWS": MAX_LINHAS_API,
              "PGRST_DB_EXTRA_SEARCH_PATH": "public", "DEFAULT_ORGANIZATION_NAME": "LOG20",
              "DEFAULT_PROJECT_NAME": nome, "OPENAI_API_KEY": "", "SUPABASE_URL": f"http://kong:{PORTA_GATEWAY}",
              "SUPABASE_PUBLIC_URL": url.rstrip("/"), "SUPABASE_ANON_KEY": seg.anon,
