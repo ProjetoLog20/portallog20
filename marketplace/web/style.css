@@ -1028,3 +1028,18 @@ table:not(.matriz) thead th { font-size: 11.5px; text-transform: uppercase; lett
 
 /* usuários: remover desativado */
 .botao.sutil.perigo-texto { color: var(--erro); }
+
+/* ---------- alertas de saúde ---------- */
+.contador-menu {
+  display: inline-block; min-width: 18px; margin-left: 6px; padding: 2px 5px;
+  border-radius: 999px; background: var(--erro); color: #fff;
+  font: 600 11px/14px var(--corpo); text-align: center; vertical-align: 1px;
+}
+.contador-menu[hidden] { display: none; }
+.lista-alertas { display: grid; gap: 10px; }
+.lista-alertas .aviso-item a { font-weight: 600; }
+.painel small.suave { color: var(--suave); }
+.grupo-smtp { margin-top: 12px; }
+.ajustes-backup .form-grade.quatro + .form-grade.quatro { margin-top: 14px; }
+.tabela-alertas td:first-child { min-width: 240px; }
+.grupo-smtp[hidden] { display: none; }
