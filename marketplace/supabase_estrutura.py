@@ -127,6 +127,12 @@ def _rodar(c: Copia, raiz: Path, escolhidos: list[str], pasta_dados: Path,
             aplicados += 1
             c.registrar(f"ok  {rel}")
         c.resumo["aplicados"] = aplicados
+        c.etapa = "Atualizando as estatísticas do banco (ANALYZE)"
+        try:
+            banco.local_sql("analyze;", usuario="postgres", transacao=False)
+            c.registrar("Estatísticas do banco atualizadas (ANALYZE).")
+        except ErroCopia as exc:
+            c.registrar(f"Aviso: ANALYZE não foi possível ({exc}). Rode \"analyze;\" no SQL Editor do Studio.")
         c.resumo["tabelas"] = tabelas_public(pasta_dados, c.sid)
         c.estado = "concluida"
         c.registrar(f"Concluído: {aplicados} arquivo(s), {c.resumo['tabelas']} tabela(s) no esquema public.")
