@@ -85,16 +85,22 @@ tirar_env() {  # comenta a linha (sem apagar), para quem quiser ver o que havia
   if grep -q "^$1=" .env; then sed -i "s#^$1=#\# (desligar-https $DATA) $1=#" .env; fi
 }
 
+ip_principal() {  # o IP da placa que leva a rede (sem as redes internas do Docker)
+  local ip
+  ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')"
+  printf '%s' "${ip:-$(hostname -I | awk '{print $1}')}"
+}
+
 perguntar() {
   [ "$SIM" = 1 ] && return 0
   local r
-  read -r -p "$1 [s/N] " r
+  read -r -p "$1 [s/N] (digite s; Enter cancela) " r
   [[ "${r:-n}" =~ ^[sS] ]]
 }
 
 # ------------------------------------------------------------------ desligar
 if [ "$MODO" = "desligar" ]; then
-  IP="$(hostname -I | awk '{print $1}')"
+  IP="$(ip_principal)"
   azul "Desligar o HTTPS"
   echo "O portal volta para http://$IP:8000 e os sistemas para http://$IP:<porta>."
   echo "Os arquivos do certificado ficam em $PASTA_CERT (sem uso)."
@@ -258,9 +264,10 @@ if [ "$MODO" = "ligar" ]; then
   IPS=" $(hostname -I | xargs) "
   RESOLVE="$(getent ahostsv4 "$NOME" | awk '{print $1; exit}' || true)"
   if [ -z "$RESOLVE" ]; then
-    aviso "  $NOME ainda nao existe no DNS. Os usuarios so vao chegar quando a TI criar o nome apontando para$IPS(esta VM)."
+    aviso "  $NOME ainda nao existe no DNS. Os usuarios so vao chegar quando a TI criar o nome apontando para $(ip_principal) (esta VM)."
+    aviso "  Se ligar agora, a porta 8000 fecha e os usuarios ficam sem acesso ate o nome existir."
   elif [[ "$IPS" != *" $RESOLVE "* ]]; then
-    aviso "  $NOME aponta para $RESOLVE, que nao e esta VM ($(xargs <<<"$IPS")). Confira o DNS com a TI."
+    aviso "  $NOME aponta para $RESOLVE, que nao e esta VM ($(ip_principal)). Confira o DNS com a TI."
   else
     ok "  $NOME aponta para esta VM ($RESOLVE)."
   fi
@@ -299,7 +306,9 @@ if [ "$MODO" = "ligar" ]; then
     aviso "Rode agora: bash deploy/atualizar.sh"
     exit 0
   fi
-  bash deploy/atualizar.sh
+  # Um sistema que falha no atualizar.sh (ex.: repositorio fora do token) nao impede o HTTPS:
+  # o portal e o Caddy ja foram recriados antes; segue para a conferencia.
+  bash deploy/atualizar.sh || aviso "O atualizar.sh terminou com avisos (veja acima); o HTTPS foi aplicado, conferindo."
 else
   if [ "$ATUALIZAR" = 0 ]; then
     aviso "Para usar o certificado novo: Solucoes > Recarregar catalogo (ou bash deploy/atualizar.sh)."
