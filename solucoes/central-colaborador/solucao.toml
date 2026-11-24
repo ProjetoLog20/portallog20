@@ -25,7 +25,7 @@ criado uma vez, na VM: bash solucoes/central-colaborador/criar-admin.sh
 [build]
 # O portal clona este repositorio (branch "ref") e constroi a imagem com o Dockerfile da raiz.
 # Repositorio privado: defina PORTAL_GIT_TOKEN com um token de leitura.
-repositorio = "https://github.com/ProjetoLog20/Chatbot-rh-central-colabotador.git"
+repositorio = "https://github.com/ProjetoLog20/chatbot-rh-central-colaborador"
 ref = "main"
 dockerfile = "Dockerfile"
 imagem = "log20/central-colaborador:local"
