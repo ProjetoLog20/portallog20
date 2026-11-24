@@ -46,6 +46,13 @@ Abra http://localhost:8000 e entre com o administrador criado. Em **Soluções**
 abra a Central do Colaborador e clique em **Instalar e iniciar** (o primeiro build leva
 alguns minutos). Em **Usuários**, crie as pessoas e marque os sistemas de cada uma.
 
+**Central do Colaborador no PostgreSQL do servidor:** no primeiro início o portal cria o banco e o
+usuário dela e preenche `DATABASE_URL`; a cada início aplica as migrações novas do sistema
+(`antes_de_iniciar` no manifesto). O banco começa sem usuários: crie o primeiro administrador
+uma vez, na VM, na pasta do portal: `bash solucoes/central-colaborador/criar-admin.sh` (senha
+temporária, trocada no primeiro acesso). Com outro banco em `DATABASE_URL` (ex.: Supabase), o
+portal não mexe nele nem roda as migrações.
+
 ## Rodar no servidor ou numa VM (Docker Compose)
 
 No servidor tudo roda em Docker: o **portal** (porta 8000), o **Caddy**, que é a única

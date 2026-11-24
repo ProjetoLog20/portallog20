@@ -104,6 +104,12 @@ caminho_abrir = "/"
 # responsavel por proteger essas paginas. Apague a linha se nao precisar.
 # caminhos_publicos = ["/formulario/*", "/static/*"]
 
+# Comando rodado a cada Iniciar/Atualizar, antes de trocar o container: ex.: migracoes do banco.
+# Roda num container temporario com a mesma imagem, ambiente, rede e volumes; o primeiro item
+# substitui o ENTRYPOINT da imagem. Se falhar, o container em uso continua como estava e o erro
+# aparece no log do Iniciar. Apague a linha se nao precisar.
+# antes_de_iniciar = ["python", "manage.py", "migrate", "--noinput"]
+
 # Variaveis de ambiente fixas da aplicacao. Valores sempre entre aspas.
 # {url} vira o endereco publico da solucao (ex.: http://192.168.0.10:8103) e {host} so o nome ou IP
 # (ex.: 192.168.0.10, para ALLOWED_HOSTS do Django). {url} e util para CORS,

@@ -17,8 +17,9 @@ descricao = """
 Central do Colaborador da LOG20: login por matrícula, áreas para colaborador, motorista e administrador,
 importação de planilhas e o Yuri, o assistente de RH com IA opcional.
 
-Nesta instalação local os dados ficam em SQLite, num volume Docker que é mantido quando o container é
-parado, atualizado ou removido.
+Os dados ficam num banco próprio no PostgreSQL do servidor, criado pelo portal na primeira vez que o
+sistema inicia; a cada início o portal aplica as migrações novas do sistema. O primeiro administrador é
+criado uma vez, na VM: bash solucoes/central-colaborador/criar-admin.sh
 """
 
 [build]
@@ -34,23 +35,30 @@ porta_container = 4000
 porta_host = 8101
 caminho_saude = "/api/health"
 caminho_abrir = "/"
+# A cada Iniciar/Atualizar, antes de trocar o container: aplica as migracoes novas do banco do
+# servidor (o script do sistema guarda o que ja foi aplicado em schema_migrations). Se falhar, nada
+# muda. Com outro banco nas configuracoes (ex.: Supabase), as migracoes ficam com quem cuida dele.
+antes_de_iniciar = ["sh", "-c", "case \"$DATABASE_URL\" in *@log20-postgres:*) exec node backend/scripts/migrate.js ;; *) echo 'Banco fora do servidor: migracoes nao aplicadas pelo portal.' ;; esac"]
 
 [execucao.ambiente]
 NODE_ENV = "production"
 PORT = "4000"
 FRONTEND_URL = "{url}"
-SEED_DEMO = "true"
 GEO_RESTRICTION_ENABLED = "false"
 
 [execucao.volumes]
 dados = "/app/backend/data"
 uploads = "/app/backend/uploads"
 
-# Backup diario: copia o banco externo (Supabase) apontado por DATABASE_URL, so o esquema
-# public (as tabelas do sistema).
-[backup]
-banco_externo = "DATABASE_URL"
-esquemas = ["public"]
+# Banco no PostgreSQL do servidor: na primeira vez o portal cria o banco e o usuario da Central e
+# preenche DATABASE_URL (so se ainda estiver vazia). Rede interna do Docker: sem SSL (sslmode=disable
+# substitui o SSL que a Central liga sozinha em producao). Entra no backup diario com os outros bancos
+# do servidor. Para usar outro banco (ex.: Supabase), troque DATABASE_URL; o portal nao sobrescreve.
+[banco]
+tipo = "postgres"
+
+[banco.configuracoes]
+DATABASE_URL = "{db_url}?sslmode=disable"
 
 [[configuracoes]]
 nome = "YURI_AI_ENABLED"
@@ -73,9 +81,9 @@ padrao = "gpt-5-mini"
 
 [[configuracoes]]
 nome = "DATABASE_URL"
-rotulo = "Banco PostgreSQL (opcional)"
+rotulo = "Banco PostgreSQL"
 tipo = "segredo"
-ajuda = "Em branco usa SQLite local. No Supabase, use a string do Session pooler (Connect > Session pooler) e rode as migrations antes."
+ajuda = "Preenchido pelo portal com o banco do servidor no primeiro início. Para usar outro banco (ex.: Supabase), cole aqui a string do Session pooler."
 
 [[configuracoes]]
 nome = "DATABASE_SSL_REJECT_UNAUTHORIZED"
@@ -83,18 +91,3 @@ rotulo = "Exigir certificado SSL reconhecido no banco"
 tipo = "booleano"
 padrao = "false"
 ajuda = "Deixe desmarcado para o Supabase: o certificado dele é assinado pela própria autoridade do Supabase. A conexão continua criptografada."
-
-[[acessos_demo]]
-perfil = "Administrador"
-usuario = "1000"
-senha = "log20"
-
-[[acessos_demo]]
-perfil = "Motorista"
-usuario = "2000"
-senha = "log20"
-
-[[acessos_demo]]
-perfil = "Colaborador"
-usuario = "3000"
-senha = "log20"

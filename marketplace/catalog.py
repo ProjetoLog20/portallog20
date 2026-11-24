@@ -144,6 +144,10 @@ class Solucao:
     supabase: dict[str, str] | None = None
     # [supabase] realtime = true: a pilha ganha o servico de tempo real (supabase-js .channel())
     supabase_realtime: bool = False
+    # [execucao] antes_de_iniciar = ["node", "scripts/migrate.js"]: comando rodado a cada Iniciar,
+    # num container temporario com a mesma imagem, ambiente, rede e volumes, antes de trocar o
+    # container (ex.: migracoes do banco). Se falhar, o container em uso continua como estava.
+    antes_de_iniciar: list[str] = field(default_factory=list)
 
     @property
     def container(self) -> str:
@@ -240,6 +244,13 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         )
     if any(c in ("/", "/*") for c in publicos):
         raise ManifestoInvalido(f"{caminho}: caminhos_publicos nao pode liberar o sistema inteiro ('/' ou '/*')")
+    antes = execucao.get("antes_de_iniciar", [])
+    if (not isinstance(antes, list) or len(antes) > 30
+            or not all(isinstance(a, str) and a and len(a) <= 500 for a in antes)):
+        raise ManifestoInvalido(
+            f"{caminho}: antes_de_iniciar deve ser uma lista de textos, como [\"node\", \"scripts/migrate.js\"]")
+    if antes and servico_externo:
+        raise ManifestoInvalido(f"{caminho}: antes_de_iniciar nao combina com externo")
     for chave, valor in execucao.get("ambiente", {}).items():
         if isinstance(valor, (dict, list)):
             raise ManifestoInvalido(f"{caminho}: variavel de ambiente '{chave}' deve ser texto")
@@ -375,6 +386,7 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         recursos_cpus=rec_cpus,
         supabase=supabase,
         supabase_realtime=supabase_realtime,
+        antes_de_iniciar=list(antes),
     )
 
 
