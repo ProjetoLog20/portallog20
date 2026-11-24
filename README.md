@@ -126,10 +126,88 @@ de portas `8101-8130`, uma por solução; para ampliar, mude a faixa no serviço
 O container do portal recebe acesso ao Docker do servidor (`/var/run/docker.sock`), então
 quem é administrador do portal controla o Docker daquela máquina. Crie poucos administradores.
 
-### Com domínio e HTTPS
+### HTTPS com certificado próprio
 
-Para produção, coloque um proxy reverso na frente: veja `deploy/Caddyfile.exemplo` e a
-seção comentada do `variaveis.exemplo`. Nesse modo:
+Um nome para o servidor, com portas: o portal fica em `https://<nome>` e cada sistema em
+`https://<nome>:<porta>` (ex.: `https://portal.log20.com.br:8117`). Quem digitar `http://` é
+levado para o `https://` (porta 80 e porta de cada sistema). O acesso passa a ser **pelo nome**:
+pelo IP, o HTTPS não abre.
+
+**Antes:** o nome no DNS interno apontando para o IP da VM; as portas 443, 80 e 8101-8130
+liberadas na rede interna (nada para a internet; a 80 só serve para redirecionar); o
+certificado vale para o nome (curinga `*.log20.com.br` também serve).
+
+**Pelo script (recomendado)**, na pasta do portal na VM, com o arquivo que a TI mandou:
+
+```bash
+bash deploy/ligar-https.sh portal.log20.com.br certificado.pfx            # .pfx/.p12: pede a senha
+bash deploy/ligar-https.sh portal.log20.com.br certificado.crt chave.key  # certificado + chave
+bash deploy/ligar-https.sh --renovar certificado-novo.pfx                 # trocar (renovação)
+bash deploy/ligar-https.sh --desligar                                     # voltar para http://IP
+```
+
+Antes de mexer em qualquer coisa, ele confere se o certificado vale para o nome, se a chave é
+dele, a validade, se as portas 443 e 80 estão livres e se o nome já aponta para a VM no DNS; com
+problema, para e explica. Converte `.pfx`, `.cer` binário e chave com senha; guarda o certificado
+anterior (`dados/certificados/anterior-<data>/`) e uma cópia do `.env`; ajusta o `.env`; roda o
+`deploy/atualizar.sh` (ao renovar, só recarrega o Caddy) e, no fim, confere se `https://<nome>`
+responde com o certificado novo. `--sim` não pergunta; `--sem-atualizar` só instala.
+
+**À mão (o que o script faz):**
+
+**1. Os arquivos**, na VM, em `dados/certificados/` dentro da pasta do portal (fora do Git). A
+pasta `dados/` é do root (criada pelo container): use `sudo` nos comandos dentro dela.
+
+| Arquivo | O que é |
+| --- | --- |
+| `certificado.pem` | O certificado em PEM, com a cadeia intermediária depois dele, se houver |
+| `chave.pem` | A chave privada em PEM, **sem senha** |
+
+```bash
+sudo mkdir -p dados/certificados && sudo chmod 700 dados/certificados
+# Veio .pfx/.p12 (pede a senha do arquivo):
+sudo openssl pkcs12 -in certificado.pfx -clcerts -nokeys -out dados/certificados/certificado.pem
+sudo openssl pkcs12 -in certificado.pfx -nocerts -nodes -out dados/certificados/chave.pem
+# Veio .cer binário (DER):  sudo openssl x509 -inform der -in certificado.cer -out dados/certificados/certificado.pem
+# Chave com senha:          sudo openssl pkey -in chave-com-senha.pem -out dados/certificados/chave.pem
+sudo chmod 600 dados/certificados/chave.pem
+sudo openssl x509 -in dados/certificados/certificado.pem -noout -subject -enddate -ext subjectAltName
+```
+
+**2. O `.env`:**
+
+```
+PORTAL_URL_BASE=https://portal.log20.com.br
+PORTAL_URL_PUBLICA=https://portal.log20.com.br
+PORTAL_BIND_PORTAL=127.0.0.1
+```
+
+Com `https://` no `PORTAL_URL_BASE`, o cookie de sessão passa a ser só de conexão segura e o
+portal confia no Caddy para saber o IP de quem acessa. `PORTAL_BIND_PORTAL=127.0.0.1` fecha a
+porta 8000 para a rede: o portal só é acessado pelo Caddy (no próprio servidor,
+`http://localhost:8000` continua). O `deploy/atualizar.sh` não troca mais o endereço quando o IP
+muda (só faz isso quando o `.env` usa um IP).
+
+**3. Aplicar:** `bash deploy/atualizar.sh`. Os sistemas com Supabase (ex.: Panorama) são
+reconstruídos sozinhos com o endereço `https://` novo. Se outra coisa na VM já usa a porta 443 ou
+80, troque no `.env` (`PORTAL_PORTA_HTTPS`, `PORTAL_PORTA_HTTP`).
+
+**Conferência:** antes de ligar o HTTPS, o portal confere os arquivos, se a chave é do
+certificado, se o nome está coberto e a validade. Com problema, o Caddy continua em HTTP (os
+sistemas seguem acessíveis por `http://IP:porta`) e a tela **Alertas** mostra o motivo; o alerta
+"Certificado HTTPS" também avisa 30 dias antes de vencer (ajustável), e o e-mail de situação
+mostra a validade.
+
+**Trocar o certificado (renovação):** substitua os dois arquivos e clique em **Recarregar
+catálogo** (Soluções) ou rode `bash deploy/atualizar.sh`. Não precisa reiniciar nada.
+
+**Voltar para HTTP:** `PORTAL_URL_BASE=http://IP`, `PORTAL_URL_PUBLICA=http://IP:8000`, tire
+`PORTAL_BIND_PORTAL` e rode `bash deploy/atualizar.sh`.
+
+### Com um subdomínio por sistema
+
+Alternativa com um nome para cada sistema: veja `deploy/Caddyfile.exemplo` (modelo antigo, de um
+Caddy fora do Docker) e a seção comentada do `variaveis.exemplo`. Nesse modo:
 
 - cada solução ganha um subdomínio (ex.: `https://rh.log20.com.br`), configurado em
   **Soluções → Gerenciar → Acesso → Endereço público**;
@@ -179,10 +257,12 @@ use `http://<ip>:9101` como endereço público. As portas internas (8101 em dian
 | `PORTAL_BIND_SOLUCOES` | `127.0.0.1` | `0.0.0.0` publica as soluções na rede |
 | `PORTAL_HOST` / `PORTAL_PORTA` | `127.0.0.1` / `8000` | Onde o portal escuta |
 | `PORTAL_SESSAO_HORAS` | `12` | Horas sem uso até o login vencer (cada uso renova; no máximo 30 dias desde o login) |
-| `PORTAL_COOKIE_SEGURO` | `false` | `true` quando houver HTTPS |
+| `PORTAL_COOKIE_SEGURO` | `true` com `https://` no `PORTAL_URL_BASE` | Cookie de sessão só em conexão segura |
+| `PORTAL_BIND_PORTAL` | `0.0.0.0` | `127.0.0.1` fecha a porta 8000 para a rede (com HTTPS, o portal fica só pelo Caddy) |
+| `PORTAL_PORTA_HTTPS` / `PORTAL_PORTA_HTTP` | `443` / `80` | Portas do Caddy na VM para o portal em https e o redirecionamento |
 | `PORTAL_URL_PUBLICA` | `http://localhost:8000` | Endereço do portal, para onde o proxy manda quem não está logado |
 | `PORTAL_COOKIE_DOMINIO` | | Ex.: `.log20.com.br`, para a sessão valer nos subdomínios |
-| `PORTAL_PROXIES` | `127.0.0.1` | IPs de proxies confiáveis (`*` atrás de proxy) |
+| `PORTAL_PROXIES` | `127.0.0.1` (`*` com HTTPS) | IPs de proxies confiáveis (`*` atrás de proxy) |
 | `PORTAL_HOST_INTERNO` | `127.0.0.1` | Como o portal alcança as soluções para checar se estão no ar |
 | `PORTAL_REDE_DOCKER` | | Rede do Docker das soluções (`log20` no compose); o Caddy as alcança pelo nome |
 | `PORTAL_PUBLICAR_PORTAS` | `true` | `false` não abre porta para as soluções: só o Caddy na mesma rede chega nelas |
@@ -409,6 +489,7 @@ dentro do portal confere a cada minuto:
 | Pouco espaço em disco | Menos de 10 GB ou 10% livres no disco do portal ou da pasta de backup. |
 | Backup | O último falhou, não foi feito (ex.: falta de espaço) ou o último completo tem mais de 26 h. |
 | Segunda cópia do backup | A cópia falhou, ou a pasta dela está no **mesmo disco da VM** (a pasta de rede não está montada e a "cópia" cairia na própria VM). |
+| Certificado HTTPS | Com HTTPS: o certificado vence em menos de 30 dias, venceu, ou tem problema (arquivo faltando, chave errada, nome que não bate) e o portal ficou em HTTP. |
 
 Cada alerta tem início e fim (histórico de 180 dias). O aviso por **e-mail** sai quando começa,
 quando resolve (com a duração) e, enquanto continuar, a cada 12 h. Tudo isso, os limites e os

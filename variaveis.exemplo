@@ -61,7 +61,18 @@ PORTAL_POSTGRES_SENHA=
 # Login vence depois de tantas horas SEM USO (usar o portal ou um sistema renova; maximo 30 dias).
 PORTAL_SESSAO_HORAS=12
 
-# ---- So com HTTPS e dominios proprios (veja deploy/Caddyfile.exemplo) ----
+# ---- HTTPS com certificado proprio: um nome com portas (README, "HTTPS com certificado proprio") ----
+# O jeito facil: bash deploy/ligar-https.sh portal.log20.com.br certificado.pfx (ajusta estas linhas).
+# Arquivos em dados/certificados/certificado.pem e chave.pem (sem senha). O cookie seguro e o
+# PORTAL_PROXIES=* passam a valer sozinhos com https:// no PORTAL_URL_BASE.
+# PORTAL_URL_BASE=https://portal.log20.com.br
+# PORTAL_URL_PUBLICA=https://portal.log20.com.br
+# PORTAL_BIND_PORTAL=127.0.0.1
+# Se a VM ja usa 443 ou 80 para outra coisa:
+# PORTAL_PORTA_HTTPS=443
+# PORTAL_PORTA_HTTP=80
+
+# ---- Alternativa: um subdominio por sistema (veja deploy/Caddyfile.exemplo) ----
 # PORTAL_COOKIE_SEGURO=true
 # PORTAL_URL_PUBLICA=https://portal.log20.com.br
 # PORTAL_COOKIE_DOMINIO=.log20.com.br

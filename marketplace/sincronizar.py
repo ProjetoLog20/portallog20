@@ -5,7 +5,8 @@ Usado por `deploy/atualizar.sh` depois de atualizar o portal. Para cada solucao 
 - nunca instalada ou sem container: constroi (se preciso) e inicia;
 - com problema: inicia de novo;
 - no ar: so reinicia com --reiniciar (ex.: o IP da VM mudou) e reconstroi com --atualizar
-  (busca o ultimo commit do branch);
+  (busca o ultimo commit do branch); reconstroi tambem quando as variaveis de construcao mudaram
+  (ex.: o endereco do servidor passou a ser https: o site precisa do endereco novo);
 - parada: fica parada (alguem parou de proposito), a nao ser com --incluir-paradas.
 
 Tambem regera a configuracao do Caddy. As operacoes rodam uma por vez, com o log no terminal.
@@ -92,6 +93,7 @@ def _executar(cfg, atualizar: bool, reiniciar: bool, incluir_paradas: bool, some
                 del solucoes[sid]
     for msg in erros:
         print(f"AVISO  {msg}")
+    todas = dict(solucoes)  # o Caddy sempre recebe o catalogo inteiro, mesmo com "somente"
     if somente:
         desconhecidas = [s for s in somente if s not in solucoes]
         if desconhecidas:
@@ -100,7 +102,9 @@ def _executar(cfg, atualizar: bool, reiniciar: bool, incluir_paradas: bool, some
         solucoes = {k: v for k, v in solucoes.items() if k in somente}
 
     if cfg.caddy_container:
-        r = proxy.aplicar(proxy.gerar(list(solucoes.values()), cfg.portal_upstream),
+        from . import certificado
+
+        r = proxy.aplicar(proxy.gerar(list(todas.values()), cfg.portal_upstream, https=certificado.para_caddy(cfg)),
                           cfg.caddy_pasta, cfg.caddy_container)
         print(f"[caddy] {r.mensagem}")
 
@@ -112,6 +116,10 @@ def _executar(cfg, atualizar: bool, reiniciar: bool, incluir_paradas: bool, some
             continue  # sobe por fora do portal (ex.: deploy/supabase)
         estado = ger.status(sol)["estado"]
         acao = _acao(estado, atualizar, reiniciar, incluir_paradas)
+        if acao is None and estado in ("rodando", "iniciando") and ger._construcao_mudou(sol):
+            # Ex.: o endereco do servidor mudou (outro IP, ou https): o site no ar ainda usa o antigo.
+            # "Iniciar" reconstroi a imagem com os valores novos (Gerenciador._rodar).
+            acao = "iniciar"
         # Solucoes que dividem a imagem (ex.: principal + homologacao): constroi uma vez so.
         if acao == "reconstruir" and sol.imagem in imagens_feitas:
             acao = "iniciar"

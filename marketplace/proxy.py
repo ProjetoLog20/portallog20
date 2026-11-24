@@ -2,7 +2,9 @@
 
 Cada solucao do catalogo vira um bloco `:<porta_host>` que pergunta ao portal se a pessoa
 esta logada e tem acesso (forward auth) e encaminha para `<container>:<porta_container>`
-na rede interna. O arquivo e escrito em `dados/caddy/Caddyfile`, pasta que o container do
+na rede interna. Com HTTPS (certificado.py), os blocos viram `https://<nome>:<porta_host>` com o
+certificado proprio, o portal ganha `https://<nome>` (443) e a porta 80 leva para o HTTPS.
+O arquivo e escrito em `dados/caddy/Caddyfile`, pasta que o container do
 Caddy le. Antes de trocar o arquivo em uso, o portal valida a versao nova com o proprio
 Caddy (`docker exec ... caddy validate`); se houver erro, a configuracao anterior continua.
 """
@@ -31,7 +33,7 @@ _PAGINA_FORA_DO_AR = (
     'border-top:5px solid #003a4d;border-radius:10px">'
     '<h1 style="margin:0 0 8px;font-size:22px">Sistema fora do ar</h1>'
     "<p>Este sistema não está disponível agora. Tente de novo em alguns minutos ou avise o administrador do portal.</p>"
-    '<a href="http://{http.request.host}:PORTA_PORTAL/" style="display:inline-block;margin-top:16px;padding:10px 16px;'
+    '<a href="ENDERECO_PORTAL" style="display:inline-block;margin-top:16px;padding:10px 16px;'
     'border-radius:6px;background:#003a4d;color:#fff;text-decoration:none;font-weight:600">Ir para o Portal de Soluções</a>'
     "</main></body></html>"
 )
@@ -56,14 +58,25 @@ def filtro_cookie(nome_cookie: str) -> str:
 
 
 def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "portal_sessao",
-          extras: list[str] | None = None) -> str:
-    """Monta o Caddyfile. A saida e deterministica (mesma entrada, mesmo texto)."""
+          extras: list[str] | None = None, https: dict | None = None) -> str:
+    """Monta o Caddyfile. A saida e deterministica (mesma entrada, mesmo texto).
+
+    `https` (de certificado.para_caddy): {"nome", "certificado", "chave", "impressao"}; None = HTTP."""
     porta_portal = portal_upstream.rsplit(":", 1)[-1] if ":" in portal_upstream else "8000"
-    pagina = _PAGINA_FORA_DO_AR.replace("PORTA_PORTAL", porta_portal)
+    if https:
+        nome = https["nome"]
+        pagina = _PAGINA_FORA_DO_AR.replace("ENDERECO_PORTAL", f"https://{nome}/")
+    else:
+        pagina = _PAGINA_FORA_DO_AR.replace("ENDERECO_PORTAL", "http://{http.request.host}:" + porta_portal + "/")
+    ordenadas = sorted(solucoes, key=lambda s: s.porta_host)
     linhas = [
         "# GERADO PELO PORTAL DE SOLUCOES - nao edite: as mudancas sao sobrescritas.",
         "# Para publicar uma solucao, crie o manifesto em solucoes/ e use 'Recarregar catalogo'.",
         "",
+    ]
+    if https:
+        linhas += _inicio_https(https, ordenadas, portal_upstream)
+    linhas += [
         "(solucao) {",
         "\t# Antes de cada pedido, pergunta ao portal se a pessoa esta logada e tem acesso.",
         f"\tforward_auth {portal_upstream} {{",
@@ -86,9 +99,12 @@ def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "p
         "\t}",
         "}",
     ]
-    for sol in sorted(solucoes, key=lambda s: s.porta_host):
+    for sol in ordenadas:
         upstream = sol.externo or f"{sol.container}:{sol.porta_container}"
-        linhas += ["", f"# {_comentario(sol.nome)}", f":{sol.porta_host} {{"]
+        endereco = f"https://{https['nome']}:{sol.porta_host}" if https else f":{sol.porta_host}"
+        linhas += ["", f"# {_comentario(sol.nome)}", f"{endereco} {{"]
+        if https:
+            linhas.append("\timport certificado")
         if not sol.caminhos_publicos:
             linhas.append(f"\timport solucao {sol.id} {upstream}")
             if sol.supabase:
@@ -99,6 +115,48 @@ def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "p
     for bloco in extras or []:
         linhas += ["", bloco.rstrip("\n")]
     return "\n".join(linhas) + "\n"
+
+
+def _inicio_https(https: dict, solucoes: list[Solucao], portal_upstream: str) -> list[str]:
+    """Opcoes globais, o certificado e os sites do portal (443) e do redirecionamento (80)."""
+    nome = https["nome"]
+    portas = [":443"] + [f":{s.porta_host}" for s in solucoes]
+    linhas = [
+        f"# HTTPS com certificado proprio para {nome} (dados/certificados; impressao {https['impressao']}).",
+        "{",
+        "\t# O certificado vem dos arquivos: nada de certificado automatico. O redirecionamento da",
+        "\t# porta 80 e o de cada porta (http:// na porta do sistema) estao definidos abaixo.",
+        "\tauto_https disable_redirects",
+    ]
+    for porta in portas:
+        linhas += [
+            f"\tservers {porta} {{",
+            "\t\tlistener_wrappers {",
+            "\t\t\thttp_redirect",
+            "\t\t\ttls",
+            "\t\t}",
+            "\t}",
+        ]
+    linhas += [
+        "}",
+        "",
+        "(certificado) {",
+        f"\ttls {https['certificado']} {https['chave']}",
+        "}",
+        "",
+        "# Portal de Solucoes",
+        f"https://{nome} {{",
+        "\timport certificado",
+        f"\treverse_proxy {portal_upstream}",
+        "}",
+        "",
+        "# http:// (porta 80) leva para o portal em https",
+        "http:// {",
+        f"\tredir https://{nome}{{uri}} permanent",
+        "}",
+        "",
+    ]
+    return linhas
 
 
 def _bloco_supabase(sol: Solucao, nivel: int = 1) -> list[str]:

@@ -278,7 +278,10 @@ def servir(args: argparse.Namespace) -> int:
         port=args.porta,
         reload=args.recarregar,
         proxy_headers=True,
-        forwarded_allow_ips=os.environ.get("PORTAL_PROXIES", "127.0.0.1"),
+        # Com HTTPS, o portal so e acessado pelo Caddy (porta 8000 presa em 127.0.0.1): confia nele
+        # para saber o IP de quem acessa (limite de tentativas de login por IP).
+        forwarded_allow_ips=os.environ.get("PORTAL_PROXIES") or (
+            "*" if os.environ.get("PORTAL_URL_BASE", "").startswith("https://") else "127.0.0.1"),
         log_config=_config_log(),
     )
     return 0

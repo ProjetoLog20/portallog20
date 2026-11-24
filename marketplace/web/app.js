@@ -2978,6 +2978,10 @@ function pintarAjustesBackup() {
 
 const estadoAlertas = { aba: "alertas", dados: null };
 
+function dataCurta(ts) {
+  return new Date(ts * 1000).toLocaleDateString("pt-BR");
+}
+
 function duracaoTexto(s) {
   s = Math.max(0, Math.round(s));
   if (s < 3600) return `${Math.max(1, Math.floor(s / 60))} min`;
@@ -3077,8 +3081,15 @@ function pintarListaAlertas() {
           h("td", {}, h("strong", {}, a.titulo), h("br"), h("small", { class: "suave" }, a.detalhe)),
           h("td", {}, quando(a.inicio)), h("td", {}, quando(a.fim)), h("td", {}, duracaoTexto(a.fim - a.inicio)))))))
     : h("p", { class: "nota" }, "Nenhum alerta resolvido ainda.");
+  const c = d.certificado;
+  const painelHttps = c && c.configurado ? h("section", { class: "painel" }, h("h2", {}, "HTTPS"),
+    c.ok
+      ? h("p", {}, h("strong", {}, `https://${c.nome}`), ` · certificado válido até ${dataCurta(c.valido_ate)} (${plural(c.dias, "dia", "dias")})`,
+          h("br"), h("small", { class: "suave" }, `Vale para: ${c.nomes.join(", ")}${c.emissor ? ` · emitido por ${c.emissor}` : ""}`))
+      : h("p", {}, h("strong", {}, "Desligado: "), c.erro, " Os sistemas respondem só em http://, pelo IP.")) : null;
   document.getElementById("alertas-corpo").replaceChildren(
     h("section", { class: "painel" }, h("h2", {}, `Ativos (${d.ativos.length})`), ativos),
+    painelHttps,
     h("section", { class: "painel" }, h("h2", {}, "Histórico"), historico,
       h("p", { class: "nota" }, "Os últimos 100 alertas resolvidos; guardados por 180 dias.")));
 }
@@ -3126,7 +3137,8 @@ function pintarAjustesAlertas() {
         tipo("memoria", "Um sistema perto do limite de memória definido em Uso."),
         tipo("disco", "Pouco espaço livre no disco do portal ou da pasta de backup."),
         tipo("backup", "O último backup falhou, não foi feito ou está atrasado."),
-        tipo("copia", "A segunda cópia falhou, ou a pasta de rede não está montada (a cópia cairia no disco da VM).")),
+        tipo("copia", "A segunda cópia falhou, ou a pasta de rede não está montada (a cópia cairia no disco da VM)."),
+        tipo("certificado", "Com HTTPS: o certificado vai vencer, venceu ou tem problema (o portal volta para HTTP).")),
       h("h3", { class: "topo-16" }, "Limites"),
       h("div", { class: "form-grade quatro" },
         numero("minutos_fora", "Fora do ar há (min)", "Antes de avisar. Evita alerta por uma reinicialização rápida.", { min: 1, max: 120 }),
@@ -3135,7 +3147,8 @@ function pintarAjustesAlertas() {
         numero("backup_horas", "Backup atrasado após (h)", "Desde o último backup completo.", { min: 2, max: 336 })),
       h("div", { class: "form-grade quatro" },
         numero("disco_min_gb", "Disco livre mínimo (GB)", "", { min: 0, step: "0.5" }),
-        numero("disco_min_pct", "ou mínimo (%)", "Avisa quando qualquer um dos dois for atingido.", { min: 0, max: 90 }))),
+        numero("disco_min_pct", "ou mínimo (%)", "Avisa quando qualquer um dos dois for atingido.", { min: 0, max: 90 }),
+        numero("certificado_dias", "Certificado vence em (dias)", "Avisa quando faltar menos que isso.", { min: 1, max: 180 }))),
     h("section", { class: "painel" }, h("h2", {}, "Avisos"),
       h("div", { class: "form-grade quatro" },
         numero("lembrar_horas", "Lembrar a cada (h)", "Enquanto o problema continuar. 0 = não lembrar.", { min: 0, max: 168 })),
@@ -3170,6 +3183,7 @@ function pintarAjustesAlertas() {
       tipos: Object.fromEntries(Object.keys(d.tipos).map((t) => [t, v(`tipo-${t}`).checked])),
       minutos_fora: v("minutos_fora").value, memoria_pct: v("memoria_pct").value, memoria_minutos: v("memoria_minutos").value,
       backup_horas: v("backup_horas").value, disco_min_gb: v("disco_min_gb").value, disco_min_pct: v("disco_min_pct").value,
+      certificado_dias: v("certificado_dias").value,
       lembrar_horas: v("lembrar_horas").value, avisar_resolvido: v("avisar_resolvido").checked,
       email_ativo: v("email_ativo").checked, email_para: v("email_para").value, smtp_origem: origem.value,
       smtp_servidor: v("smtp_servidor").value.trim(), smtp_porta: v("smtp_porta").value.trim(), smtp_usuario: v("smtp_usuario").value.trim(),
