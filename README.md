@@ -129,7 +129,7 @@ quem é administrador do portal controla o Docker daquela máquina. Crie poucos 
 ### HTTPS com certificado próprio
 
 Um nome para o servidor, com portas: o portal fica em `https://<nome>` e cada sistema em
-`https://<nome>:<porta>` (ex.: `https://panorama.log20.com.br:8117`). Quem digitar `http://` é
+`https://<nome>:<porta>` (ex.: `https://portal.log20.com.br:8117`). Quem digitar `http://` é
 levado para o `https://` (porta 80 e porta de cada sistema). O acesso passa a ser **pelo nome**:
 pelo IP, o HTTPS não abre.
 
@@ -137,7 +137,26 @@ pelo IP, o HTTPS não abre.
 liberadas na rede interna (nada para a internet; a 80 só serve para redirecionar); o
 certificado vale para o nome (curinga `*.log20.com.br` também serve).
 
-**1. Os arquivos**, na VM, em `dados/certificados/` dentro da pasta do portal (fora do Git):
+**Pelo script (recomendado)**, na pasta do portal na VM, com o arquivo que a TI mandou:
+
+```bash
+bash deploy/ligar-https.sh portal.log20.com.br certificado.pfx            # .pfx/.p12: pede a senha
+bash deploy/ligar-https.sh portal.log20.com.br certificado.crt chave.key  # certificado + chave
+bash deploy/ligar-https.sh --renovar certificado-novo.pfx                 # trocar (renovação)
+bash deploy/ligar-https.sh --desligar                                     # voltar para http://IP
+```
+
+Antes de mexer em qualquer coisa, ele confere se o certificado vale para o nome, se a chave é
+dele, a validade, se as portas 443 e 80 estão livres e se o nome já aponta para a VM no DNS; com
+problema, para e explica. Converte `.pfx`, `.cer` binário e chave com senha; guarda o certificado
+anterior (`dados/certificados/anterior-<data>/`) e uma cópia do `.env`; ajusta o `.env`; roda o
+`deploy/atualizar.sh` (ao renovar, só recarrega o Caddy) e, no fim, confere se `https://<nome>`
+responde com o certificado novo. `--sim` não pergunta; `--sem-atualizar` só instala.
+
+**À mão (o que o script faz):**
+
+**1. Os arquivos**, na VM, em `dados/certificados/` dentro da pasta do portal (fora do Git). A
+pasta `dados/` é do root (criada pelo container): use `sudo` nos comandos dentro dela.
 
 | Arquivo | O que é |
 | --- | --- |
@@ -145,21 +164,21 @@ certificado vale para o nome (curinga `*.log20.com.br` também serve).
 | `chave.pem` | A chave privada em PEM, **sem senha** |
 
 ```bash
-mkdir -p dados/certificados && chmod 700 dados/certificados
+sudo mkdir -p dados/certificados && sudo chmod 700 dados/certificados
 # Veio .pfx/.p12 (pede a senha do arquivo):
-openssl pkcs12 -in certificado.pfx -clcerts -nokeys -out dados/certificados/certificado.pem
-openssl pkcs12 -in certificado.pfx -nocerts -nodes -out dados/certificados/chave.pem
-# Veio .cer binário (DER):  openssl x509 -inform der -in certificado.cer -out dados/certificados/certificado.pem
-# Chave com senha:          openssl pkey -in chave-com-senha.pem -out dados/certificados/chave.pem
-chmod 600 dados/certificados/chave.pem
-openssl x509 -in dados/certificados/certificado.pem -noout -subject -enddate -ext subjectAltName
+sudo openssl pkcs12 -in certificado.pfx -clcerts -nokeys -out dados/certificados/certificado.pem
+sudo openssl pkcs12 -in certificado.pfx -nocerts -nodes -out dados/certificados/chave.pem
+# Veio .cer binário (DER):  sudo openssl x509 -inform der -in certificado.cer -out dados/certificados/certificado.pem
+# Chave com senha:          sudo openssl pkey -in chave-com-senha.pem -out dados/certificados/chave.pem
+sudo chmod 600 dados/certificados/chave.pem
+sudo openssl x509 -in dados/certificados/certificado.pem -noout -subject -enddate -ext subjectAltName
 ```
 
 **2. O `.env`:**
 
 ```
-PORTAL_URL_BASE=https://panorama.log20.com.br
-PORTAL_URL_PUBLICA=https://panorama.log20.com.br
+PORTAL_URL_BASE=https://portal.log20.com.br
+PORTAL_URL_PUBLICA=https://portal.log20.com.br
 PORTAL_BIND_PORTAL=127.0.0.1
 ```
 

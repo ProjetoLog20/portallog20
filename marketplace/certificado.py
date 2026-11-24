@@ -1,6 +1,6 @@
 """HTTPS com certificado proprio (um nome para o servidor, com portas).
 
-Ligado quando `PORTAL_URL_BASE` comeca com `https://` (ex.: https://panorama.log20.com.br). O
+Ligado quando `PORTAL_URL_BASE` comeca com `https://` (ex.: https://portal.log20.com.br). O
 certificado e a chave ficam em `dados/certificados/certificado.pem` e `chave.pem` (o Caddy le a
 mesma pasta em /certificados). Com eles:
 
