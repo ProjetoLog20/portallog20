@@ -20,7 +20,7 @@ arquivos importados ficam num volume; os dois são mantidos ao atualizar ou rein
 """
 
 [build]
-repositorio = "https://github.com/JungGustavo/log20-orcamento_obz.git"
+repositorio = "https://github.com/ProjetoLog20/log20-orcamento_obz"
 ref = "master"
 dockerfile_portal = "Dockerfile"
 
