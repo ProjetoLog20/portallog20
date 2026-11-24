@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -178,6 +179,53 @@ def run_container(
         args += ["-v", f"{volume}:{target}"]
     args.append(image)
     return _check(_run(args, timeout=120, env=env), "Falha ao iniciar o container").strip()
+
+
+def run_once(
+    *,
+    name: str,
+    image: str,
+    comando: list[str],
+    on_line: Callable[[str], None],
+    rede: str = "",
+    env: dict[str, str],
+    volumes: dict[str, str],
+    memoria_mb: int = 0,
+    cpus: float = 0,
+    timeout: float = 1800,
+) -> int:
+    """Roda `comando` uma vez num container temporario (apagado no fim) e devolve o codigo de saida.
+
+    O primeiro item vira o --entrypoint (o da imagem, que normalmente sobe o servidor, nao roda);
+    os demais sao os argumentos. Mesmo ambiente (-e NOME, valores pelo ambiente do processo),
+    rede e volumes do container normal. Passado o `timeout`, o container e parado.
+    """
+    remove(name)
+    args = ["run", "--rm", "--name", name, "--entrypoint", comando[0]]
+    if memoria_mb:
+        args += ["--memory", f"{memoria_mb}m", "--memory-swap", f"{memoria_mb}m"]
+    if cpus:
+        args += ["--cpus", f"{cpus:g}"]
+    if rede:
+        args += ["--network", rede]
+    for key in env:
+        args += ["-e", key]
+    for volume, target in volumes.items():
+        args += ["-v", f"{volume}:{target}"]
+    args += [image, *comando[1:]]
+    full_env = os.environ.copy()
+    full_env.update(env)
+    proc = subprocess.Popen([docker_bin(), *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding="utf-8", errors="replace", env=full_env)
+    vigia = threading.Timer(timeout, lambda: _run(["stop", "-t", "5", name], timeout=60))
+    vigia.start()
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            on_line(line.rstrip("\n"))
+        return proc.wait()
+    finally:
+        vigia.cancel()
 
 
 def stop(name: str, timeout: int = 30) -> None:

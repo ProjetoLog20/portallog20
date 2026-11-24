@@ -485,10 +485,25 @@ class Gerenciador:
                             realtime=sol.supabase_realtime)
             except sb.ErroSupabase as exc:
                 raise docker_cli.DockerError(str(exc)) from exc
+        lim = self.limites(sol)
+        if sol.antes_de_iniciar:
+            # Ex.: migracoes do banco. Roda com a imagem nova antes de trocar o container: se falhar,
+            # o container em uso (se houver) continua como estava.
+            tarefa.etapa = "Preparando (comando antes de iniciar)"
+            tarefa.registrar(f"$ {' '.join(sol.antes_de_iniciar)}")
+            codigo = docker_cli.run_once(
+                name=f"{sol.container}-antes", image=sol.imagem, comando=sol.antes_de_iniciar,
+                on_line=lambda l: tarefa.registrar(f"  {l}"), rede=self.config.rede_docker,
+                env=self.ambiente(sol), volumes=sol.volumes_docker(),
+                memoria_mb=lim["memoria_mb"], cpus=lim["cpus"])
+            if codigo != 0:
+                raise docker_cli.DockerError(
+                    f"O comando antes de iniciar falhou (codigo {codigo}); veja as linhas acima. "
+                    "Nada foi trocado: o container em uso continua como estava.")
+            tarefa.registrar("Comando antes de iniciar: ok.")
         tarefa.etapa = "Iniciando container"
         # Recria o container para aplicar configuracoes novas; os volumes preservam os dados.
         docker_cli.remove(sol.container)
-        lim = self.limites(sol)
         tarefa.registrar(f"$ docker run {sol.container} -> {self.url(sol)}"
                          f" (memoria: {_texto_mem(lim['memoria_mb'])}, CPU: {_texto_cpus(lim['cpus'])})")
         cid = docker_cli.run_container(
