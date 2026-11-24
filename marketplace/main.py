@@ -14,10 +14,12 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 
 from . import config as config_mod
-from . import assistente, docker_cli, proxy
+from . import assistente, correio, docker_cli, proxy
 from . import supabase as sb
 from . import supabase_copia, supabase_estrutura
 from . import fontes as fontes_mod
+from .alertas import TIPOS as TIPOS_ALERTA
+from .alertas import Alertas, ErroAlertas
 from .backup import Backups, ErroBackup, formatar_tamanho, resumo
 from .catalog import cpus_validas, memoria_mb
 from .uso import INFRA, Uso
@@ -99,12 +101,16 @@ BACKUPS = Backups(CFG, ger)
 # Uso de memoria, CPU e disco (tela Uso): coletor em segundo plano.
 USO = Uso(CFG, ger, lambda: BACKUPS.pasta)
 
+# Alertas de saude (tela Alertas): vigia em segundo plano, avisos por e-mail.
+ALERTAS = Alertas(CFG, ger, BACKUPS, USO)
+
 
 @app.on_event("startup")
 def _iniciar_agendador() -> None:
     _limpar_somente_admin(ger().solucoes)
     BACKUPS.iniciar_agendador()
     USO.iniciar()
+    ALERTAS.iniciar()
 
 
 # ---------------- protecoes gerais ----------------
@@ -564,9 +570,6 @@ def api_supabase_login(sid: str, dados: dict = Body(..., embed=True), autor: Usu
 @app.post("/api/solucoes/{sid}/supabase/login/testar")
 def api_supabase_login_testar(sid: str, dados: dict = Body(..., embed=True), _: Usuario = Depends(exigir_admin)) -> dict:
     """Conecta no servidor de e-mail e confere usuario e senha, sem enviar nada."""
-    import smtplib
-    import ssl
-
     sol = _solucao(sid)
     if not sol.supabase:
         raise HTTPException(400, "Esta solucao nao usa o Supabase do servidor.")
@@ -575,27 +578,11 @@ def api_supabase_login_testar(sid: str, dados: dict = Body(..., embed=True), _: 
     smtp, origem = sb.smtp_efetivo(cfg)
     if origem == "nenhum":
         raise HTTPException(400, "Nenhum servidor de e-mail configurado (nem neste sistema, nem no .env).")
-    porta = int(smtp["porta"] or 587)
     try:
-        ctx = ssl.create_default_context()
-        if porta == 465:
-            con = smtplib.SMTP_SSL(smtp["servidor"], porta, timeout=15, context=ctx)
-        else:
-            con = smtplib.SMTP(smtp["servidor"], porta, timeout=15)
-            con.ehlo()
-            if con.has_extn("starttls"):
-                con.starttls(context=ctx)
-                con.ehlo()
-        with con:
-            if smtp["usuario"]:
-                con.login(smtp["usuario"], smtp["senha"])
-    except smtplib.SMTPAuthenticationError:
-        raise HTTPException(400, "O servidor de e-mail recusou o usuário ou a senha.") from None
-    except (OSError, smtplib.SMTPException) as exc:
-        raise HTTPException(400, f"Não foi possível conectar em {smtp['servidor']}:{porta}: {exc}") from None
-    return {"ok": True, "mensagem": f"Conexão com {smtp['servidor']}:{porta} OK"
-            + (" e usuário/senha aceitos." if smtp["usuario"] else " (sem usuário).")
-            + (" Usando o e-mail do servidor (.env)." if origem == "servidor" else "")}
+        mensagem = correio.testar(smtp)
+    except correio.ErroCorreio as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {"ok": True, "mensagem": mensagem + (" Usando o e-mail do servidor (.env)." if origem == "servidor" else "")}
 
 
 @app.post("/api/solucoes/{sid}/supabase/desfazer")
@@ -1058,6 +1045,68 @@ def api_acessos(
 @app.get("/api/historico")
 def api_historico(limite: int = 200, _: Usuario = Depends(exigir_admin)) -> dict:
     return {"eventos": AUTH.historico(limite)}
+
+
+# ---------------- alertas de saude ----------------
+
+@app.get("/api/saude", include_in_schema=False)
+def api_saude() -> dict:
+    """Sem login: para um monitor de fora (ex.: o da TI) saber se o portal esta no ar."""
+    return {"ok": True}
+
+
+@app.get("/api/alertas")
+def api_alertas(_: Usuario = Depends(exigir_admin)) -> dict:
+    nomes = {sid: s.nome for sid, s in ger().solucoes.items()}
+    return {
+        "ativos": ALERTAS.ativos(),
+        "historico": ALERTAS.historico(),
+        "ajustes": ALERTAS.ajustes().publico(),
+        "tipos": TIPOS_ALERTA,
+        "origens_smtp": ALERTAS.origens_smtp(),
+        "nomes": nomes,
+        "ultima_verificacao": int(ALERTAS.ultima_verificacao) or None,
+        "erro": ALERTAS.erro,
+        "erro_envio": ALERTAS.erro_envio,
+        "erro_envio_em": int(ALERTAS.erro_envio_em) or None,
+    }
+
+
+@app.get("/api/alertas/resumo")
+def api_alertas_resumo(_: Usuario = Depends(exigir_admin)) -> dict:
+    return {"ativos": ALERTAS.total_ativos()}
+
+
+@app.put("/api/alertas/ajustes")
+def api_alertas_ajustes(ajustes: dict = Body(..., embed=True), autor: Usuario = Depends(exigir_admin)) -> dict:
+    try:
+        aj = ALERTAS.salvar(ajustes)
+    except ErroAlertas as exc:
+        raise HTTPException(400, str(exc)) from exc
+    AUTH.registrar(autor, "Alterou os ajustes dos alertas",
+                   f"{'ligados' if aj.ativo else 'desligados'}; "
+                   + (f"e-mail para {', '.join(aj.email_para)}" if aj.email_ativo else "sem e-mail (só na tela)"))
+    return {"ok": True, "ajustes": aj.publico()}
+
+
+@app.post("/api/alertas/enviar-situacao")
+def api_alertas_enviar_situacao(autor: Usuario = Depends(exigir_admin)) -> dict:
+    """E-mail agora com a situacao atual (alertas ativos, sistemas, disco e backup)."""
+    try:
+        mensagem = ALERTAS.enviar_situacao()
+    except ErroAlertas as exc:
+        raise HTTPException(400, str(exc)) from exc
+    AUTH.registrar(autor, "Enviou a situação atual por e-mail", ", ".join(ALERTAS.ajustes().email_para))
+    return {"ok": True, "mensagem": mensagem}
+
+
+@app.post("/api/alertas/testar")
+def api_alertas_testar(ajustes: dict = Body(..., embed=True), _: Usuario = Depends(exigir_admin)) -> dict:
+    """Envia um e-mail de teste com os valores da tela (sem salvar)."""
+    try:
+        return {"ok": True, "mensagem": ALERTAS.testar(ajustes)}
+    except ErroAlertas as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 # ---------------- backups ----------------

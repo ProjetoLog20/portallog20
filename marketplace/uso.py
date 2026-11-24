@@ -286,6 +286,12 @@ class Uso:
         return {"inicio": inicio, "fim": fim, "passo": passo, "series": series, "maquina": maq,
                 "picos_24h": picos, "eventos": eventos}
 
+    def eventos_desde(self, ts: int) -> list[dict]:
+        """Reinicios e encerramentos por falta de memoria a partir de `ts` (usado pelos alertas)."""
+        with self._lock, contextlib.closing(self._con()) as con:
+            return [{"ts": t, "alvo": a, "tipo": tp, "detalhe": d} for t, a, tp, d in con.execute(
+                "SELECT ts, alvo, tipo, detalhe FROM evento WHERE ts >= ? ORDER BY ts", (ts,))]
+
     def limpar_antigos(self) -> None:
         limite = int(time.time()) - self.cfg.uso_dias * 86400
         with self._lock, contextlib.closing(self._con()) as con, con:

@@ -3,7 +3,7 @@
 /* =========================================================================
    Portal de Soluções LOG20 — interface (sem frameworks)
    Rotas: #/  #/login  #/senha  #/admin/solucoes  #/admin/solucao/<id>
-          #/admin/usuarios  #/admin/acessos  #/admin/backups  #/admin/uso
+          #/admin/usuarios  #/admin/acessos  #/admin/backups  #/admin/uso  #/admin/alertas
    ========================================================================= */
 
 const ROTULOS = {
@@ -235,7 +235,10 @@ function montarTopo() {
         item("#/admin/usuarios", "Usuários", rota === "#/admin/usuarios"),
         item("#/admin/acessos", "Acessos", rota === "#/admin/acessos"),
         item("#/admin/backups", "Backups", rota === "#/admin/backups"),
-        item("#/admin/uso", "Uso", rota === "#/admin/uso"));
+        item("#/admin/uso", "Uso", rota === "#/admin/uso"),
+        h("a", { href: "#/admin/alertas", "aria-current": rota === "#/admin/alertas" ? "page" : null },
+          "Alertas", h("span", { class: "contador-menu", id: "menu-alertas-n", hidden: true })));
+      atualizarContadorAlertas();
     }
   }
   const sair = async () => { await api("/api/auth/logout", { method: "POST" }).catch(() => {}); eu = null; location.hash = "#/login"; };
@@ -2971,6 +2974,222 @@ function pintarAjustesBackup() {
   alvo.replaceChildren(form);
 }
 
+/* ================= admin: alertas de saúde ================= */
+
+const estadoAlertas = { aba: "alertas", dados: null };
+
+function duracaoTexto(s) {
+  s = Math.max(0, Math.round(s));
+  if (s < 3600) return `${Math.max(1, Math.floor(s / 60))} min`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+  return `${Math.floor(s / 86400)} d ${Math.floor((s % 86400) / 3600)} h`;
+}
+
+/** Número de alertas ativos ao lado de "Alertas" no menu (só administradores). */
+async function atualizarContadorAlertas() {
+  const alvo = document.getElementById("menu-alertas-n");
+  if (!alvo) return;
+  try {
+    const { ativos } = await api("/api/alertas/resumo");
+    alvo.textContent = ativos ? String(ativos) : "";
+    alvo.hidden = !ativos;
+    alvo.title = ativos ? plural(ativos, "alerta ativo", "alertas ativos") : "";
+  } catch { /* fica como está */ }
+}
+
+async function telaAlertas() {
+  document.title = "Alertas · Portal de Soluções LOG20";
+  estadoAlertas.dados = await api("/api/alertas");
+  const abas = [["alertas", "Alertas"], ["ajustes", "Ajustes"]];
+  $conteudo.replaceChildren(
+    h("section", { class: "intro intro-linha" },
+      h("div", {}, h("h1", {}, "Alertas"),
+        h("p", {}, "O portal confere a saúde do servidor a cada minuto e avisa os administradores quando algo dá errado.")),
+      h("div", { class: "intro-lado" },
+        h("button", { type: "button", class: "botao", onclick: enviarSituacao,
+          title: "Alertas ativos, estado de cada sistema, espaço em disco e último backup" }, "Enviar situação atual por e-mail"))),
+    h("div", { id: "alertas-aviso" }),
+    h("div", { class: "abas", role: "tablist" }, abas.map(([k, rotulo]) =>
+      h("button", { type: "button", role: "tab", "aria-selected": String(estadoAlertas.aba === k),
+        onclick: () => { estadoAlertas.aba = k; telaAlertas(); } }, rotulo))),
+    h("div", { id: "alertas-corpo" }));
+  pintarAvisoAlertas();
+  if (estadoAlertas.aba === "ajustes") pintarAjustesAlertas();
+  else pintarListaAlertas();
+}
+
+async function enviarSituacao(ev) {
+  const botao = ev.currentTarget;
+  const para = estadoAlertas.dados?.ajustes.email_para || [];
+  if (!para.length) { toast("Informe os destinatários em Ajustes → E-mail e salve.", "erro"); return; }
+  if (!(await confirmar({ titulo: "Enviar a situação atual?",
+    texto: `Um e-mail agora para ${para.join(", ")}, com os alertas ativos, o estado de cada sistema, o espaço em disco e o último backup.`,
+    botao: "Enviar" }))) return;
+  botao.disabled = true;
+  try { toast((await api("/api/alertas/enviar-situacao", { method: "POST" })).mensagem); }
+  catch (e) { toast(e.message, "erro"); }
+  botao.disabled = false;
+}
+
+async function atualizarAlertas() {
+  const antes = estadoAlertas.dados;
+  estadoAlertas.dados = await api("/api/alertas");
+  pintarAvisoAlertas();
+  const d = estadoAlertas.dados;
+  if (estadoAlertas.aba === "alertas" && JSON.stringify([antes?.ativos, antes?.historico, antes?.ultima_verificacao])
+      !== JSON.stringify([d.ativos, d.historico, d.ultima_verificacao])) pintarListaAlertas();
+  atualizarContadorAlertas();
+}
+
+function pintarAvisoAlertas() {
+  const d = estadoAlertas.dados;
+  const aj = d.ajustes;
+  const msgs = [];
+  if (!aj.ativo) msgs.push(h("li", {}, "Os alertas estão desligados (Ajustes)."));
+  else if (!aj.email_ativo) msgs.push(h("li", {}, "O envio por e-mail está desligado: os alertas só aparecem nesta tela. Ligue em Ajustes."));
+  if (d.erro_envio) msgs.push(h("li", {}, `O último aviso não foi enviado (${quando(d.erro_envio_em)}): ${d.erro_envio}`));
+  if (d.erro) msgs.push(h("li", {}, `Erro na verificação: ${d.erro}`));
+  document.getElementById("alertas-aviso").replaceChildren(
+    msgs.length ? h("div", { class: "aviso" }, h("strong", {}, "Atenção"), h("ul", {}, msgs)) : null);
+}
+
+function nomeAlvoAlerta(a) {
+  return estadoAlertas.dados.nomes[a.alvo] || "";
+}
+
+function pintarListaAlertas() {
+  const d = estadoAlertas.dados;
+  const agora = Date.now() / 1000;
+  const ativos = d.ativos.length
+    ? h("div", { class: "lista-alertas" }, d.ativos.map((a) => h("div", { class: "aviso-item erro" },
+        h("span", { class: "aviso-nivel" }, `${d.tipos[a.tipo] || a.tipo} · desde ${quando(a.inicio)} (${duracaoTexto(agora - a.inicio)})`),
+        h("strong", {}, a.titulo),
+        h("p", {}, a.detalhe),
+        d.nomes[a.alvo] ? h("p", {}, h("a", { href: `#/admin/solucao/${a.alvo}` }, `Abrir ${d.nomes[a.alvo]}`)) : null)))
+    : h("div", { class: "vazio vazio-lado" }, h("strong", {}, "Nenhum alerta ativo"),
+        h("p", {}, d.ajustes.ativo
+          ? (d.ultima_verificacao ? `Última verificação: ${quando(d.ultima_verificacao)}.` : "A primeira verificação sai cerca de um minuto depois que o portal inicia.")
+          : "Os alertas estão desligados."));
+  const historico = d.historico.length
+    ? h("div", { class: "tabela-rolagem" }, h("table", { class: "tabela-simples tabela-alertas" },
+        h("thead", {}, h("tr", {}, h("th", {}, "Alerta"), h("th", {}, "Começou"), h("th", {}, "Resolvido"), h("th", {}, "Duração"))),
+        h("tbody", {}, d.historico.map((a) => h("tr", {},
+          h("td", {}, h("strong", {}, a.titulo), h("br"), h("small", { class: "suave" }, a.detalhe)),
+          h("td", {}, quando(a.inicio)), h("td", {}, quando(a.fim)), h("td", {}, duracaoTexto(a.fim - a.inicio)))))))
+    : h("p", { class: "nota" }, "Nenhum alerta resolvido ainda.");
+  document.getElementById("alertas-corpo").replaceChildren(
+    h("section", { class: "painel" }, h("h2", {}, `Ativos (${d.ativos.length})`), ativos),
+    h("section", { class: "painel" }, h("h2", {}, "Histórico"), historico,
+      h("p", { class: "nota" }, "Os últimos 100 alertas resolvidos; guardados por 180 dias.")));
+}
+
+function pintarAjustesAlertas() {
+  const d = estadoAlertas.dados;
+  const aj = d.ajustes;
+  const check = (nome, rotulo, ajuda, marcado) => h("label", { class: "campo-check" },
+    h("input", { type: "checkbox", name: nome, checked: marcado ?? !!aj[nome] }),
+    h("span", {}, h("strong", {}, rotulo), ajuda ? h("small", {}, ` ${ajuda}`) : null));
+  const numero = (nome, rotulo, ajuda, extra = {}) => h("div", { class: "campo" },
+    h("label", { for: `al-${nome}` }, rotulo),
+    h("input", { type: "number", id: `al-${nome}`, name: nome, value: aj[nome], ...extra }),
+    ajuda ? h("small", {}, ajuda) : null);
+  const texto = (nome, rotulo, ajuda, extra = {}) => h("div", { class: "campo" },
+    h("label", { for: `al-${nome}` }, rotulo),
+    h("input", { type: "text", id: `al-${nome}`, name: nome, value: aj[nome] ?? "", autocomplete: "off", spellcheck: false, ...extra }),
+    ajuda ? h("small", {}, ajuda) : null);
+  const tipo = (t, ajuda) => check(`tipo-${t}`, d.tipos[t], ajuda, aj.tipos[t] !== false);
+
+  const origem = h("select", { id: "al-smtp_origem", name: "smtp_origem" },
+    d.origens_smtp.map((o) => h("option", { value: o.id, selected: o.id === aj.smtp_origem }, o.servidor ? `${o.nome} (${o.servidor})` : o.nome)));
+  const proprio = h("div", { class: "grupo-smtp" },
+    h("div", { class: "form-grade" },
+      texto("smtp_servidor", "Servidor de e-mail (SMTP)", "", { placeholder: "smtp.office365.com" }),
+      numero("smtp_porta", "Porta", "587 (STARTTLS) ou 465 (SSL).", { min: 1, max: 65535 }),
+      texto("smtp_usuario", "Usuário", "")),
+    h("div", { class: "form-grade" },
+      texto("smtp_senha", "Senha", aj.tem_senha ? "Em branco mantém a senha guardada." : "",
+        { type: "password", autocomplete: "new-password", value: "", placeholder: aj.tem_senha ? "•••••••• (guardada)" : "" }),
+      texto("smtp_remetente", "E-mail do remetente", "", { inputmode: "email", placeholder: "alertas@log20.com.br" }),
+      texto("smtp_nome", "Nome do remetente", "", { placeholder: "Portal LOG20" })));
+  const mostrarProprio = () => { proprio.hidden = origem.value !== "proprio"; };
+  origem.addEventListener("change", mostrarProprio);
+  mostrarProprio();
+
+  const erro = h("p", { class: "form-erro", role: "alert", hidden: true });
+  const ok = h("p", { class: "nota", role: "status", hidden: true });
+  const form = h("form", { class: "config ajustes-backup" },
+    h("section", { class: "painel" }, h("h2", {}, "O que vigiar"),
+      check("ativo", "Alertas ligados", "O portal confere a cada minuto. Sistemas parados de propósito não geram alerta."),
+      h("div", { class: "lista-checks" },
+        tipo("sistema", "Um sistema que deveria estar no ar cai ou não responde (inclui o Supabase dele)."),
+        tipo("reinicios", "3 ou mais reinícios em 30 minutos, ou parada por falta de memória."),
+        tipo("memoria", "Um sistema perto do limite de memória definido em Uso."),
+        tipo("disco", "Pouco espaço livre no disco do portal ou da pasta de backup."),
+        tipo("backup", "O último backup falhou, não foi feito ou está atrasado."),
+        tipo("copia", "A segunda cópia falhou, ou a pasta de rede não está montada (a cópia cairia no disco da VM).")),
+      h("h3", { class: "topo-16" }, "Limites"),
+      h("div", { class: "form-grade quatro" },
+        numero("minutos_fora", "Fora do ar há (min)", "Antes de avisar. Evita alerta por uma reinicialização rápida.", { min: 1, max: 120 }),
+        numero("memoria_pct", "Memória acima de (%)", "Do limite de cada sistema.", { min: 50, max: 100 }),
+        numero("memoria_minutos", "Por (min)", "Quanto tempo acima do limite antes de avisar.", { min: 1, max: 120 }),
+        numero("backup_horas", "Backup atrasado após (h)", "Desde o último backup completo.", { min: 2, max: 336 })),
+      h("div", { class: "form-grade quatro" },
+        numero("disco_min_gb", "Disco livre mínimo (GB)", "", { min: 0, step: "0.5" }),
+        numero("disco_min_pct", "ou mínimo (%)", "Avisa quando qualquer um dos dois for atingido.", { min: 0, max: 90 }))),
+    h("section", { class: "painel" }, h("h2", {}, "Avisos"),
+      h("div", { class: "form-grade quatro" },
+        numero("lembrar_horas", "Lembrar a cada (h)", "Enquanto o problema continuar. 0 = não lembrar.", { min: 0, max: 168 })),
+      check("avisar_resolvido", "Avisar quando resolver", "Uma mensagem quando o problema acaba, com quanto tempo durou."),
+      h("h3", { class: "topo-16" }, "E-mail"),
+      check("email_ativo", "Enviar por e-mail", ""),
+      h("div", { class: "campo" }, h("label", { for: "al-email_para" }, "Destinatários"),
+        h("input", { type: "text", id: "al-email_para", name: "email_para", value: (aj.email_para || []).join(", "), placeholder: "ti@log20.com.br, gustavo@log20.com.br", spellcheck: false }),
+        h("small", {}, "Separados por vírgula. Pode ser uma lista de distribuição.")),
+      h("div", { class: "campo" }, h("label", { for: "al-smtp_origem" }, "Servidor de e-mail"), origem,
+        h("small", {}, "Pode usar o mesmo e-mail configurado no login de um sistema (Gerenciar → Supabase → Login e e-mail).")),
+      proprio),
+    erro, ok,
+    h("div", { class: "linha-botoes" },
+      h("button", { type: "submit", class: "botao primario" }, "Salvar ajustes"),
+      h("button", { type: "button", class: "botao", onclick: async (ev) => {
+        const botao = ev.currentTarget;
+        botao.disabled = true; erro.hidden = true; ok.hidden = true;
+        try {
+          const r = await api("/api/alertas/testar", { method: "POST", body: { ajustes: valores() } });
+          ok.textContent = r.mensagem; ok.hidden = false;
+        } catch (e) { erro.textContent = e.message; erro.hidden = false; }
+        botao.disabled = false;
+      } }, "Enviar e-mail de teste")),
+    h("p", { class: "nota" }, "O portal não vigia a si mesmo: se a VM ou o portal cair, ninguém é avisado. Para isso, um monitor de fora (ex.: o da TI) pode consultar ",
+      h("code", {}, `${location.origin}/api/saude`), ", que responde sem login."));
+
+  const valores = () => {
+    const v = (n) => form.elements[n];
+    return {
+      ativo: v("ativo").checked,
+      tipos: Object.fromEntries(Object.keys(d.tipos).map((t) => [t, v(`tipo-${t}`).checked])),
+      minutos_fora: v("minutos_fora").value, memoria_pct: v("memoria_pct").value, memoria_minutos: v("memoria_minutos").value,
+      backup_horas: v("backup_horas").value, disco_min_gb: v("disco_min_gb").value, disco_min_pct: v("disco_min_pct").value,
+      lembrar_horas: v("lembrar_horas").value, avisar_resolvido: v("avisar_resolvido").checked,
+      email_ativo: v("email_ativo").checked, email_para: v("email_para").value, smtp_origem: origem.value,
+      smtp_servidor: v("smtp_servidor").value.trim(), smtp_porta: v("smtp_porta").value.trim(), smtp_usuario: v("smtp_usuario").value.trim(),
+      smtp_senha: v("smtp_senha").value, smtp_remetente: v("smtp_remetente").value.trim(), smtp_nome: v("smtp_nome").value.trim(),
+    };
+  };
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    erro.hidden = true; ok.hidden = true;
+    try {
+      await api("/api/alertas/ajustes", { method: "PUT", body: { ajustes: valores() } });
+      toast("Ajustes dos alertas salvos.");
+      estadoAlertas.dados = await api("/api/alertas");
+      pintarAvisoAlertas();
+      pintarAjustesAlertas();
+    } catch (e) { erro.textContent = e.message; erro.hidden = false; }
+  });
+  document.getElementById("alertas-corpo").replaceChildren(form);
+}
+
 /* ================= admin: uso de recursos ================= */
 
 const estadoUso = { horas: 24, dados: null, ocultas: new Set() };
@@ -3356,6 +3575,8 @@ async function atualizar() {
       await atualizarBackups();
     } else if (rota === "#/admin/uso") {
       await atualizarUso();
+    } else if (rota === "#/admin/alertas") {
+      await atualizarAlertas();
     }
   } catch { /* tenta de novo no próximo ciclo */ }
 }
@@ -3436,6 +3657,7 @@ async function navegar() {
     else if (rota.startsWith("#/admin/editar-solucao/")) await telaEditarSolucao(rota.split("/")[3]);
     else if (rota === "#/admin/backups") { await telaBackups(); novoRitmo = [2000, 30000]; }
     else if (rota === "#/admin/uso") { await telaUso(); novoRitmo = [60000, 60000]; }
+    else if (rota === "#/admin/alertas") { await telaAlertas(); novoRitmo = [30000, 30000]; }
     else { rota = "#/"; await telaMeusSistemas(); novoRitmo = [60000, 60000]; }
   } catch (e) {
     if (e.status === 401 || location.hash.split("?")[0] !== rota) return;

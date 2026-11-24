@@ -556,6 +556,7 @@ class Backups:
             self._atualizar_estado(
                 ultimo=nome, ultimo_ok=man["ok"] and not copia_erro, ultimo_em=man["criado_em"],
                 ultimo_erros=erros + ([copia_erro] if copia_erro else []), ultimo_bytes=man["bytes"],
+                ultimo_copia_erro=copia_erro,
                 **({"ultimo_sucesso": nome, "ultimo_sucesso_em": man["criado_em"]} if man["ok"] else {}),
             )
         if erros or copia_erro:

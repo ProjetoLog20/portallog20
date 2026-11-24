@@ -396,6 +396,42 @@ Sistemas que já estavam rodando antes desta versão ficam sem limite até serem
 Uso avisa e, em **Limites → Salvar**, o limite passa a valer na hora. A coleta roda dentro do
 portal a cada 60 s (`PORTAL_USO_INTERVALO`) e guarda 7 dias (`PORTAL_USO_DIAS`) em `dados/uso.db`.
 
+## Alertas de saúde
+
+Tela **Alertas** (administradores; o número ao lado do menu é o de alertas ativos). Um vigia
+dentro do portal confere a cada minuto:
+
+| Alerta | Quando abre |
+| --- | --- |
+| Sistema fora do ar | Um sistema que deveria estar no ar fica "com problema" (inclui o Supabase dele) por alguns minutos (padrão 3), ou não termina de iniciar em 10 minutos. Sistemas parados de propósito não contam. |
+| Sistema reiniciando | 3 ou mais reinícios em 30 minutos, ou parada por falta de memória. |
+| Memória perto do limite | Acima de 90% do limite do sistema (tela Uso) por 5 minutos. |
+| Pouco espaço em disco | Menos de 10 GB ou 10% livres no disco do portal ou da pasta de backup. |
+| Backup | O último falhou, não foi feito (ex.: falta de espaço) ou o último completo tem mais de 26 h. |
+| Segunda cópia do backup | A cópia falhou, ou a pasta dela está no **mesmo disco da VM** (a pasta de rede não está montada e a "cópia" cairia na própria VM). |
+
+Cada alerta tem início e fim (histórico de 180 dias). O aviso por **e-mail** sai quando começa,
+quando resolve (com a duração) e, enquanto continuar, a cada 12 h. Tudo isso, os limites e os
+tipos ligados ficam em **Alertas → Ajustes**. O servidor de e-mail pode ser preenchido ali, ser o
+do `.env` (`SUPABASE_SMTP_*`) ou o mesmo do login de um sistema; **Enviar e-mail de teste**
+confere antes de salvar. **Enviar situação atual por e-mail** (no topo da tela) manda na hora,
+para os destinatários salvos, os alertas ativos, o estado de cada sistema, o espaço em disco e o
+último backup. A senha fica em `dados/alertas.json` (só o portal lê) e não volta para
+a tela.
+
+Para não alertar à toa, o vigia espera: nos 10 primeiros minutos depois que o portal sobe,
+enquanto o `deploy/atualizar.sh` sobe os sistemas (marca `dados/sincronizando`) e durante backups e
+restaurações (o Supabase para alguns segundos).
+
+**Limite:** o portal não vigia a si mesmo. Se a VM ou o portal cair, ninguém é avisado. Para isso,
+`GET /api/saude` responde `{"ok": true}` sem login e pode ser consultado por um monitor de fora
+(ex.: o da TI).
+
+**Testar sem e-mail de verdade:** suba um servidor de teste na VM
+(`sudo docker run -d --name log20-mailpit -p 1025:1025 -p 8025:8025 -e MP_SMTP_AUTH_ACCEPT_ANY=1 -e MP_SMTP_AUTH_ALLOW_INSECURE=1 axllent/mailpit`),
+use servidor `IP-DA-VM`, porta `1025`, e veja os e-mails em `http://IP-DA-VM:8025`. Apague depois
+(`sudo docker rm -f log20-mailpit`).
+
 ## Backup e restauração
 
 Tela **Backups** (administradores). Por padrão, todo dia às 02:30 o portal copia:

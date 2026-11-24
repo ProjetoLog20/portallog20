@@ -59,7 +59,25 @@ def _rotulo(acao: str, estado: str) -> str:
 
 def executar(atualizar: bool = False, reiniciar: bool = False, incluir_paradas: bool = False,
              somente: list[str] | None = None) -> int:
+    """Enquanto roda, deixa a marca dados/sincronizando: os alertas de "sistema fora do ar" e de
+    reinicios esperam terminar (os sistemas sobem e reiniciam de proposito)."""
+    from .alertas import MARCA_SINCRONIZANDO
+
     cfg = config_mod.carregar()
+    marca = cfg.pasta_dados / MARCA_SINCRONIZANDO
+    try:
+        marca.parent.mkdir(parents=True, exist_ok=True)
+        marca.write_text(str(int(time.time())), encoding="utf-8")
+    except OSError:
+        marca = None
+    try:
+        return _executar(cfg, atualizar, reiniciar, incluir_paradas, somente)
+    finally:
+        if marca is not None:
+            marca.unlink(missing_ok=True)
+
+
+def _executar(cfg, atualizar: bool, reiniciar: bool, incluir_paradas: bool, somente: list[str] | None) -> int:
     st = docker_cli.status()
     if not st.ok:
         print(f"Docker indisponivel: {st.erro}", file=sys.stderr)
