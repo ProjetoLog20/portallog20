@@ -10,6 +10,9 @@
 # Quem entra por onde:
 #   http://<ip>:8000          portal (login, Meus sistemas, administracao)
 #   http://<ip>:8101..8130    solucoes, sempre pelo Caddy, que pergunta ao portal se a pessoa pode entrar
+# Com HTTPS (certificado proprio, veja "HTTPS com certificado proprio" no README):
+#   https://<nome>            portal, pelo Caddy (porta 443; a 80 leva para o https)
+#   https://<nome>:8101..8130 solucoes
 # As solucoes nao abrem nenhuma porta propria: ficam so na rede interna "log20".
 # A configuracao do Caddy e gerada pelo portal a partir dos manifestos (dados/caddy/Caddyfile):
 # para publicar uma solucao basta o manifesto + "Recarregar catalogo"; nada aqui muda.
@@ -38,7 +41,8 @@ services:
       PORTAL_BACKUP_COPIA: ${PORTAL_BACKUP_COPIA_HOST:+/backups-copia}
       TZ: America/Sao_Paulo
     ports:
-      - "8000:8000"
+      # Com HTTPS, PORTAL_BIND_PORTAL=127.0.0.1 no .env: o portal so e acessado pelo Caddy (https).
+      - "${PORTAL_BIND_PORTAL:-0.0.0.0}:8000:8000"
     networks:
       - log20
     volumes:
@@ -70,10 +74,16 @@ services:
     # So as portas com solucao cadastrada respondem. Para ampliar, mude aqui e em PORTAL_FAIXA_PORTAS.
     ports:
       - "8101-8130:8101-8130"
+      # Portal em https (443) e redirecionamento de http para https (80). So respondem com o
+      # HTTPS ligado; se outra coisa na maquina ja usa essas portas, mude no .env.
+      - "${PORTAL_PORTA_HTTPS:-443}:443"
+      - "${PORTAL_PORTA_HTTP:-80}:80"
     networks:
       - log20
     volumes:
       - ./dados/caddy:/etc/caddy:ro
+      # Certificado e chave do HTTPS (certificado.pem e chave.pem), lidos so pelo Caddy e pelo portal.
+      - ./dados/certificados:/certificados:ro
       - caddy-dados:/data
 
   # Um PostgreSQL para as solucoes, so na rede interna (nenhuma porta aberta na maquina).

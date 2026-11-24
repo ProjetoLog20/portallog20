@@ -9,7 +9,9 @@ Um vigia dentro do portal confere a cada minuto:
 - **disco**: pouco espaco livre no disco do portal ou da pasta de backup;
 - **backup**: o ultimo backup falhou, nao foi feito, ou faz tempo demais desde o ultimo completo;
 - **copia**: a segunda copia falhou ou a pasta dela esta no mesmo disco da VM (pasta de rede
-  desmontada: a "copia" estaria caindo no disco da propria VM).
+  desmontada: a "copia" estaria caindo no disco da propria VM);
+- **certificado**: com HTTPS, o certificado vence em poucos dias, venceu ou tem problema (arquivo
+  faltando, chave errada, nome que nao bate) e o portal ficou em HTTP.
 
 Cada problema vira um alerta com inicio e fim (historico em `dados/alertas.db`). O aviso sai uma
 vez quando comeca e outra quando resolve, com lembrete opcional a cada X horas, por e-mail
@@ -34,7 +36,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import correio, docker_cli
+from . import certificado, correio, docker_cli
 from . import supabase as sb
 from .config import RAIZ, Config
 
@@ -45,6 +47,7 @@ TIPOS = {
     "disco": "Pouco espaço em disco",
     "backup": "Backup",
     "copia": "Segunda cópia do backup",
+    "certificado": "Certificado HTTPS",
 }
 INTERVALO_S = 60
 INICIO_TOLERANCIA_S = 10 * 60      # depois que o portal sobe, os sistemas ainda estao subindo
@@ -74,6 +77,7 @@ class AjustesAlertas:
     disco_min_gb: float = 10.0
     disco_min_pct: int = 10
     backup_horas: int = 26
+    certificado_dias: int = 30
     lembrar_horas: int = 12
     avisar_resolvido: bool = True
     # Canais
@@ -114,6 +118,7 @@ class AjustesAlertas:
         aj.memoria_minutos = inteiro("memoria_minutos", 1, 120)
         aj.disco_min_pct = inteiro("disco_min_pct", 0, 90)
         aj.backup_horas = inteiro("backup_horas", 2, 24 * 14)
+        aj.certificado_dias = inteiro("certificado_dias", 1, 180)
         aj.lembrar_horas = inteiro("lembrar_horas", 0, 24 * 7)
         try:
             aj.disco_min_gb = float(dados.get("disco_min_gb", atual.disco_min_gb))
@@ -404,6 +409,20 @@ class Alertas:
                     "'bash deploy/atualizar.sh'.", INTERVALO_S * 2))
         return problemas
 
+    def _verificar_certificado(self, aj: AjustesAlertas) -> list[Problema]:
+        info = certificado.ler(self.cfg)
+        if not info["configurado"]:
+            return []
+        if not info["ok"]:
+            return [Problema("certificado:erro", "certificado", "certificado", "HTTPS desligado: problema no certificado",
+                             f"{info['erro']} Enquanto isso, os sistemas respondem só em http://, pelo IP.")]
+        if info["dias"] is not None and info["dias"] < aj.certificado_dias:
+            ate = datetime.fromtimestamp(info["valido_ate"]).strftime("%d/%m/%Y")
+            return [Problema("certificado:vencendo", "certificado", "certificado", "Certificado HTTPS perto de vencer",
+                             f"O certificado de {info['nome']} vence em {ate} ({info['dias']} dia(s)). Peça o novo à TI, "
+                             "troque certificado.pem e chave.pem em dados/certificados e clique em Recarregar catálogo.")]
+        return []
+
     def verificar(self) -> None:
         """Uma rodada: abre, mantem e fecha alertas, e envia os avisos."""
         aj = self.ajustes()
@@ -419,6 +438,7 @@ class Alertas:
             "disco": lambda: self._verificar_disco(aj),
             "backup": lambda: self._verificar_backup(aj),
             "copia": self._verificar_copia,
+            "certificado": lambda: self._verificar_certificado(aj),
         }
         vistos: dict[str, Problema] = {}
         falharam: set[str] = set()
@@ -576,6 +596,16 @@ class Alertas:
             partes.append("- Segunda cópia: não configurada")
         else:
             partes.append(f"- Segunda cópia: {'ligada' if ajb.copiar else 'desligada'}, em {self.cfg.backup_copia}")
+
+        cert = certificado.ler(self.cfg)
+        if cert["configurado"]:
+            partes.append("")
+            partes.append("HTTPS")
+            if cert["ok"]:
+                partes.append(f"- {cert['nome']}: ligado; certificado válido até "
+                              f"{datetime.fromtimestamp(cert['valido_ate']).strftime('%d/%m/%Y')} ({cert['dias']} dia(s))")
+            else:
+                partes.append(f"- {cert['nome']}: DESLIGADO ({cert['erro']})")
 
         assunto = (f"Situação atual: {len(ativos)} alerta(s) ativo(s)" if ativos else "Situação atual: nenhum alerta ativo")
         portal = self.cfg.url_publica or self.cfg.url_base

@@ -85,15 +85,17 @@ def _limite(texto: str, padrao, tipo: str):
 
 
 def carregar() -> Config:
+    url_base = os.environ.get("PORTAL_URL_BASE", "http://localhost").rstrip("/")
     return Config(
         pasta_solucoes=Path(os.environ.get("PORTAL_SOLUCOES", RAIZ / "solucoes")),
         pasta_dados=Path(os.environ.get("PORTAL_DADOS", RAIZ / "dados")),
-        url_base=os.environ.get("PORTAL_URL_BASE", "http://localhost").rstrip("/"),
+        url_base=url_base,
         bind_solucoes=os.environ.get("PORTAL_BIND_SOLUCOES", "127.0.0.1"),
         host_interno=os.environ.get("PORTAL_HOST_INTERNO", "127.0.0.1"),
         rede_docker=os.environ.get("PORTAL_REDE_DOCKER", ""),
         publicar_portas=_bool("PORTAL_PUBLICAR_PORTAS", True),
-        cookie_seguro=_bool("PORTAL_COOKIE_SEGURO"),
+        # Com HTTPS (PORTAL_URL_BASE https://...), o cookie de sessao so viaja por conexao segura.
+        cookie_seguro=_bool("PORTAL_COOKIE_SEGURO", url_base.startswith("https://")),
         cookie_dominio=os.environ.get("PORTAL_COOKIE_DOMINIO", ""),
         url_publica=os.environ.get("PORTAL_URL_PUBLICA", "").rstrip("/"),
         sessao_horas=int(os.environ.get("PORTAL_SESSAO_HORAS", "12")),

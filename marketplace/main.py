@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 
 from . import config as config_mod
-from . import assistente, correio, docker_cli, proxy
+from . import assistente, certificado, correio, docker_cli, proxy
 from . import supabase as sb
 from . import supabase_copia, supabase_estrutura
 from . import fontes as fontes_mod
@@ -80,7 +80,8 @@ def _atualizar_proxy(solucoes) -> dict | None:
     if not CFG.caddy_container:
         return None
     try:
-        r = proxy.aplicar(proxy.gerar(solucoes, CFG.portal_upstream, COOKIE), CFG.caddy_pasta, CFG.caddy_container)
+        r = proxy.aplicar(proxy.gerar(solucoes, CFG.portal_upstream, COOKIE, https=certificado.para_caddy(CFG)),
+                          CFG.caddy_pasta, CFG.caddy_container)
     except Exception as exc:  # noqa: BLE001 - o portal continua no ar mesmo se o Caddy falhar
         r = proxy.Resultado(False, f"Falha ao atualizar o Caddy: {exc}", erro=True)
     print(f"[caddy] {r.mensagem}", flush=True)
@@ -1069,6 +1070,7 @@ def api_alertas(_: Usuario = Depends(exigir_admin)) -> dict:
         "erro": ALERTAS.erro,
         "erro_envio": ALERTAS.erro_envio,
         "erro_envio_em": int(ALERTAS.erro_envio_em) or None,
+        "certificado": certificado.resumo(CFG),
     }
 
 
