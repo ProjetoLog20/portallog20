@@ -76,6 +76,8 @@ def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "p
     ]
     if https:
         linhas += _inicio_https(https, ordenadas, portal_upstream)
+    else:
+        linhas += _cabecalhos(False)
     linhas += [
         "(solucao) {",
         "\t# Antes de cada pedido, pergunta ao portal se a pessoa esta logada e tem acesso.",
@@ -105,6 +107,7 @@ def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "p
         linhas += ["", f"# {_comentario(sol.nome)}", f"{endereco} {{"]
         if https:
             linhas.append("\timport certificado")
+        linhas.append("\timport cabecalhos")
         if not sol.caminhos_publicos:
             linhas.append(f"\timport solucao {sol.id} {upstream}")
             if sol.supabase:
@@ -115,6 +118,32 @@ def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "p
     for bloco in extras or []:
         linhas += ["", bloco.rstrip("\n")]
     return "\n".join(linhas) + "\n"
+
+
+def _cabecalhos(https: bool) -> list[str]:
+    """Protecoes do navegador em todas as respostas. "?" so poe o cabecalho se o sistema nao mandou o
+    seu. HSTS (so com HTTPS): o navegador passa a usar sempre https neste nome, por um ano; sem
+    includeSubDomains, para nao afetar outros enderecos do dominio."""
+    linhas = [
+        "(cabecalhos) {",
+        # Um "?" por regra: varios no mesmo bloco viram uma condicao so (se o sistema mandar um, o
+        # Caddy deixaria de por todos).
+        '\theader ?X-Content-Type-Options "nosniff"',
+        '\theader ?Referrer-Policy "strict-origin-when-cross-origin"',
+        '\theader ?X-Frame-Options "SAMEORIGIN"',
+        "\theader {",
+    ]
+    if https:
+        linhas.append('\t\tStrict-Transport-Security "max-age=31536000"')
+    linhas += [
+        "\t\t# Sem anunciar o servidor e a versao (Caddy, Express, PHP...).",
+        "\t\t-Server",
+        "\t\t-X-Powered-By",
+        "\t}",
+        "}",
+        "",
+    ]
+    return linhas
 
 
 def _inicio_https(https: dict, solucoes: list[Solucao], portal_upstream: str) -> list[str]:
@@ -144,9 +173,11 @@ def _inicio_https(https: dict, solucoes: list[Solucao], portal_upstream: str) ->
         f"\ttls {https['certificado']} {https['chave']}",
         "}",
         "",
+        *_cabecalhos(True),
         "# Portal de Solucoes",
         f"https://{nome} {{",
         "\timport certificado",
+        "\timport cabecalhos",
         f"\treverse_proxy {portal_upstream}",
         "}",
         "",

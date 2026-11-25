@@ -208,6 +208,19 @@ mostra a validade.
 **Trocar o certificado (renovação):** substitua os dois arquivos e clique em **Recarregar
 catálogo** (Soluções) ou rode `bash deploy/atualizar.sh`. Não precisa reiniciar nada.
 
+**Portal na internet: administração só por dentro.** Por padrão, as telas de administração
+(Soluções, Usuários, Acessos, Backups, Uso, Alertas, assistente) e os sistemas só de
+administradores (pgAdmin, Studio) só abrem de **redes privadas** (a rede da empresa). Um
+administrador de fora vê só "Meus sistemas", com um aviso e o endereço que o portal enxergou.
+Para restringir a uma faixa: `PORTAL_REDES_ADMIN=172.16.0.0/16` no `.env`; `*` libera de qualquer
+lugar (só para uma emergência). Confira depois de abrir o portal na internet: se o firewall trocar
+o endereço de quem vem de fora por um interno (NAT de origem), a restrição não funciona, e o
+aviso nunca aparece para quem está fora.
+
+**Cabeçalhos de segurança:** o Caddy põe em todos os sistemas `X-Content-Type-Options`,
+`Referrer-Policy` e `X-Frame-Options` (só se o sistema não mandar os seus) e, com HTTPS, `HSTS`
+por um ano (só neste nome, sem subdomínios); tira `Server` e `X-Powered-By`.
+
 **Voltar para HTTP:** `PORTAL_URL_BASE=http://IP`, `PORTAL_URL_PUBLICA=http://IP:8000`, tire
 `PORTAL_BIND_PORTAL` e rode `bash deploy/atualizar.sh`.
 
@@ -269,7 +282,8 @@ use `http://<ip>:9101` como endereço público. As portas internas (8101 em dian
 | `PORTAL_PORTA_HTTPS` / `PORTAL_PORTA_HTTP` | `443` / `80` | Portas do Caddy na VM para o portal em https e o redirecionamento |
 | `PORTAL_URL_PUBLICA` | `http://localhost:8000` | Endereço do portal, para onde o proxy manda quem não está logado |
 | `PORTAL_COOKIE_DOMINIO` | | Ex.: `.log20.com.br`, para a sessão valer nos subdomínios |
-| `PORTAL_PROXIES` | `127.0.0.1` (`*` com HTTPS) | IPs de proxies confiáveis (`*` atrás de proxy) |
+| `PORTAL_PROXIES` | `127.0.0.1` (redes privadas com HTTPS) | De onde o portal aceita o IP de quem acessa informado por um proxy (o Caddy). Com HTTPS, só redes privadas: um IP público não consegue informar um IP falso |
+| `PORTAL_REDES_ADMIN` | redes privadas | De onde a administração do portal e os sistemas só de administradores (pgAdmin, Studio) abrem. Faixas separadas por vírgula (ex.: `172.16.0.0/16`); `*` = de qualquer lugar |
 | `PORTAL_HOST_INTERNO` | `127.0.0.1` | Como o portal alcança as soluções para checar se estão no ar |
 | `PORTAL_REDE_DOCKER` | | Rede do Docker das soluções (`log20` no compose); o Caddy as alcança pelo nome |
 | `PORTAL_PUBLICAR_PORTAS` | `true` | `false` não abre porta para as soluções: só o Caddy na mesma rede chega nelas |
