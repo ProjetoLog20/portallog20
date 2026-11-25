@@ -105,7 +105,9 @@ def gerar(solucoes: list[Solucao], portal_upstream: str, cookie_portal: str = "p
         linhas += ["", f"# {_comentario(sol.nome)}", f"{endereco} {{"]
         if https:
             linhas.append("\timport certificado")
-        if not sol.caminhos_publicos:
+        if not sol.login_portal:
+            linhas += _bloco_aberto(upstream, cookie_portal, pagina)
+        elif not sol.caminhos_publicos:
             linhas.append(f"\timport solucao {sol.id} {upstream}")
             if sol.supabase:
                 linhas += _bloco_supabase(sol)
@@ -206,6 +208,27 @@ def _bloco_com_publicos(sol: Solucao, upstream: str, portal_upstream: str, cooki
         f"\t\treverse_proxy {upstream} {{",
         filtro,
         "\t\t}",
+        "\t}",
+        "\thandle_errors {",
+        '\t\theader Content-Type "text/html; charset=utf-8"',
+        '\t\theader Cache-Control "no-store"',
+        "\t\trespond <<HTML",
+        f"\t\t\t{pagina}",
+        "\t\t\tHTML 503",
+        "\t}",
+    ]
+
+
+def _bloco_aberto(upstream: str, cookie: str, pagina: str) -> list[str]:
+    """Site sem o login do portal (manifesto: login_portal = false): o sistema usa o login dele.
+
+    A sessao do portal continua sem chegar ao sistema, e o cabecalho X-Portal-Usuario e removido:
+    sem ele, ninguem consegue se passar por um usuario do portal."""
+    return [
+        "\t# Aberto (login_portal = false): sem o login do portal; o sistema usa o login dele.",
+        f"\treverse_proxy {upstream} {{",
+        "\t\theader_up -X-Portal-Usuario",
+        f'\t\theader_up Cookie "{filtro_cookie(cookie)}" "$1"',
         "\t}",
         "\thandle_errors {",
         '\t\theader Content-Type "text/html; charset=utf-8"',

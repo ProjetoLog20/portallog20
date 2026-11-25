@@ -58,11 +58,14 @@ portal não mexe nele nem roda as migrações.
 No servidor tudo roda em Docker: o **portal** (porta 8000), o **Caddy**, que é a única
 entrada das soluções (uma porta por solução, na faixa 8101-8130), e um **PostgreSQL** para as
 soluções que precisam de banco. As soluções e o banco ficam numa rede interna do Docker, sem
-portas próprias, então só abrem para quem está logado no portal e tem acesso a elas.
+portas próprias, então só abrem para quem está logado no portal e tem acesso a elas. A exceção
+são as soluções com `login_portal = false` (hoje, a Central do Colaborador): o Caddy as abre direto,
+e quem pede login é o próprio sistema.
 
 ```
 navegador ──► :8000  portal ──────────────┐ constrói e inicia as soluções
-          └─► :8101  Caddy ─(pergunta ao portal)─► log20-central-colaborador:4000
+          ├─► :8102  Caddy ─(pergunta ao portal)─► outra solução
+          └─► :8101  Caddy ─(direto, login da Central)─► log20-central-colaborador:4000
 ```
 
 ### Testar numa VM
@@ -666,6 +669,7 @@ topo da tela de Soluções, e o acesso às soluções que já estavam no ar cont
 | `[execucao] porta_container`, `porta_host` | Porta da aplicação e porta publicada no servidor. No Git use **8101-8115**; de 8116 em diante ficam as criadas pelo assistente em cada servidor |
 | `caminho_saude`, `caminho_abrir` | Rota para saber se está no ar e rota aberta pelo botão |
 | `[execucao] caminhos_publicos` | Caminhos que abrem sem login no portal (links públicos da solução, ex.: `["/autoavaliacao/*", "/static/*"]`) |
+| `[execucao] login_portal` | `false` = o endereço do sistema abre direto, sem o login do portal (o sistema precisa ter login próprio; ex.: a Central, usada por motoristas). Na tela Acessos, a liberação só decide quem vê o atalho em Meus sistemas. Não combina com `somente_admin`, `caminhos_publicos`, `externo` nem `[supabase]` |
 | `[execucao.ambiente]` | Variáveis fixas; `{url}` vira o endereço público da solução e `{host}`, só o nome ou IP dele |
 | `[execucao.volumes]` | Pastas do container que devem persistir |
 | `segredos` | Variáveis geradas automaticamente uma única vez |

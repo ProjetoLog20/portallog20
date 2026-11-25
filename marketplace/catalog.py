@@ -121,6 +121,10 @@ class Solucao:
     # somente_admin = true: so administradores do portal abrem (ex.: pgAdmin, Supabase Studio, que
     # dao acesso total aos bancos). Nao pode ser liberada para usuarios na tela Acessos.
     somente_admin: bool = False
+    # [execucao] login_portal = false: o endereco do sistema abre direto, sem o login do portal (o
+    # sistema usa o login dele; ex.: a Central, usada por motoristas no celular). Acessos so decide
+    # quem ve o sistema em Meus sistemas.
+    login_portal: bool = True
     # [build] variaveis_na_construcao = true: site estatico (Vite/React...). Nada le variavel quando
     # o site roda, entao TODAS as variaveis (fixas e configuracoes) vao para a construcao.
     variaveis_na_construcao: bool = False
@@ -297,6 +301,14 @@ def carregar_manifesto(caminho: Path) -> Solucao:
     somente_admin = dados.get("somente_admin", False)
     if not isinstance(somente_admin, bool):
         raise ManifestoInvalido(f"{caminho}: somente_admin deve ser true ou false")
+    login_portal = execucao.get("login_portal", True)
+    if not isinstance(login_portal, bool):
+        raise ManifestoInvalido(f"{caminho}: login_portal deve ser true ou false")
+    if not login_portal:
+        conflitos = [n for n, tem in (("somente_admin", somente_admin), ("caminhos_publicos", bool(publicos)),
+                                      ("externo", bool(servico_externo)), ("[supabase]", "supabase" in dados)) if tem]
+        if conflitos:
+            raise ManifestoInvalido(f"{caminho}: login_portal = false nao combina com {', '.join(conflitos)}")
     supabase = None
     supabase_realtime = False
     if "supabase" in dados:
@@ -373,6 +385,7 @@ def carregar_manifesto(caminho: Path) -> Solucao:
         externo=servico_externo,
         requer=str(dados.get("requer", "")).strip().lower(),
         somente_admin=somente_admin,
+        login_portal=login_portal,
         ref=ref if repositorio else "",
         subpasta=subpasta,
         caminhos_publicos=list(publicos),

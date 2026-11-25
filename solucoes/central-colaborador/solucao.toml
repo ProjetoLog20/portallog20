@@ -35,6 +35,9 @@ porta_container = 4000
 porta_host = 8101
 caminho_saude = "/api/health"
 caminho_abrir = "/"
+# Acesso direto: o endereco abre sem o login do portal; a Central usa o login dela (motoristas
+# entram pelo celular, direto no sistema). O portal so mostra o atalho em Meus sistemas.
+login_portal = false
 # A cada Iniciar/Atualizar, antes de trocar o container: aplica as migracoes novas do banco do
 # servidor (o script do sistema guarda o que ja foi aplicado em schema_migrations). Se falhar, nada
 # muda. Com outro banco nas configuracoes (ex.: Supabase), as migracoes ficam com quem cuida dele.
