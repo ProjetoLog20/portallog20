@@ -104,6 +104,12 @@ caminho_abrir = "/"
 # responsavel por proteger essas paginas. Apague a linha se nao precisar.
 # caminhos_publicos = ["/formulario/*", "/static/*"]
 
+# false = o endereco do sistema abre direto, SEM o login do portal (o sistema precisa ter login
+# proprio; ex.: sistema usado por quem nao tem conta no portal). A sessao do portal continua sem
+# chegar ao sistema. Nao combina com somente_admin, caminhos_publicos, externo nem [supabase].
+# Padrao: true (pede o login do portal). Apague a linha se nao precisar.
+# login_portal = false
+
 # Comando rodado a cada Iniciar/Atualizar, antes de trocar o container: ex.: migracoes do banco.
 # Roda num container temporario com a mesma imagem, ambiente, rede e volumes; o primeiro item
 # substitui o ENTRYPOINT da imagem. Se falhar, o container em uso continua como estava e o erro
