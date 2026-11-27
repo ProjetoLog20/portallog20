@@ -969,6 +969,7 @@ function mostrarAba(k) {
 
 async function carregarPessoas(sol) {
   const alvo = document.getElementById("pessoas-solucao");
+  const avisoAberto = sol.aberto ? h("p", { class: "nota" }, "Acesso direto: o endereço deste sistema abre sem o login do portal, com o login do próprio sistema. Aqui você escolhe só quem o vê em Meus sistemas.") : null;
   if (sol.somente_admin) {
     alvo.replaceChildren(h("p", { class: "numero-grande" }, "Só", h("span", {}, "administradores")),
       h("p", { class: "nota" }, "Este sistema dá acesso total a bancos de dados: só os administradores do portal abrem. Não pode ser liberado em Acessos."));
@@ -979,6 +980,7 @@ async function carregarPessoas(sol) {
     const comAcesso = usuarios.filter((u) => u.ativo && u.perfil !== "admin" && u.solucoes.includes(sol.id));
     const admins = usuarios.filter((u) => u.ativo && u.perfil === "admin").length;
     alvo.replaceChildren(
+      avisoAberto,
       h("p", { class: "numero-grande" }, comAcesso.length, h("span", {}, comAcesso.length === 1 ? "pessoa com acesso" : "pessoas com acesso")),
       h("p", { class: "nota" }, `Além de ${plural(admins, "administrador", "administradores")}, que acessam todos os sistemas.`),
       comAcesso.length
@@ -1674,6 +1676,9 @@ function detalheSistema(sol) {
       h("p", {}, sol.somente_admin
         ? `${sol.categoria || "Geral"} · só administradores do portal abrem (${plural(admins.length, "administrador", "administradores")})`
         : `${sol.categoria || "Geral"} · ${plural(comAcesso(sol.id).filter((u) => u.ativo).length, "pessoa com acesso", "pessoas com acesso")}, além de ${plural(admins.length, "administrador", "administradores")}`)));
+  if (sol.aberto) {
+    cabeca.append(h("p", { class: "nota" }, "Acesso direto: o endereço abre sem o login do portal, com o login do próprio sistema. A liberação abaixo só decide quem o vê em Meus sistemas."));
+  }
   if (sol.somente_admin) {
     return h("section", { class: "painel detalhe-acesso" }, cabeca,
       h("p", { class: "nota" }, "Este sistema dá acesso total a bancos de dados. Não pode ser liberado para usuários: para dar acesso, torne a pessoa administradora em Usuários."),

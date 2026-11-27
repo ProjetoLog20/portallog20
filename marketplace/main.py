@@ -398,6 +398,7 @@ def _resumo(sol: Solucao, docker_ok: bool) -> dict:
         "local": sol.local,
         "externo": bool(sol.externo),
         "somente_admin": sol.somente_admin,
+        "aberto": not sol.login_portal,
     }
 
 
@@ -448,6 +449,7 @@ def api_detalhe(sid: str, _: Usuario = Depends(exigir_admin)) -> dict:
         "supabase": _detalhe_supabase(sol, docker_ok),
         "externo": bool(sol.externo),
         "somente_admin": sol.somente_admin,
+        "aberto": not sol.login_portal,
         "local": sol.local,
         "dockerfile_portal": bool(sol.dockerfile_portal),
         "acessos_demo": [vars(a) for a in sol.acessos_demo],
@@ -936,7 +938,7 @@ def api_usuarios(_: Usuario = Depends(exigir_admin)) -> dict:
         "usuarios": AUTH.listar(),
         "solucoes": [
             {"id": s.id, "nome": s.nome, "categoria": s.categoria, "logo": _logo_url(s),
-             "somente_admin": s.somente_admin}
+             "somente_admin": s.somente_admin, "aberto": not s.login_portal}
             for s in ger().solucoes.values()
         ],
     }
