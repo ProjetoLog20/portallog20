@@ -36,6 +36,8 @@ class Config:
     # Endereco publico do proprio portal (usado para redirecionar ao login).
     url_publica: str
     sessao_horas: int
+    # Redes de onde a administracao do portal abre (PORTAL_REDES_ADMIN). None = de qualquer lugar.
+    redes_admin: tuple | None
     docs_api: bool
     # Token de leitura para clonar repositorios privados das solucoes (enviado so para git_host).
     git_token: str
@@ -84,6 +86,30 @@ def _limite(texto: str, padrao, tipo: str):
         return padrao
 
 
+# Redes privadas (RFC 1918, loopback e equivalentes IPv6): a rede da empresa e a do Docker.
+REDES_PRIVADAS = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128,fc00::/7"
+
+
+def _redes(texto: str) -> tuple | None:
+    """PORTAL_REDES_ADMIN: faixas separadas por virgula (ex.: 172.16.0.0/16,10.8.0.0/24).
+    Vazio = redes privadas; "*" ou "todas" = sem restricao."""
+    import ipaddress
+
+    texto = texto.strip() or REDES_PRIVADAS
+    if texto.lower() in ("*", "todas", "qualquer"):
+        return None
+    redes = []
+    for parte in texto.split(","):
+        parte = parte.strip()
+        if not parte:
+            continue
+        try:
+            redes.append(ipaddress.ip_network(parte, strict=False))
+        except ValueError as exc:
+            raise ValueError(f"PORTAL_REDES_ADMIN: faixa invalida '{parte}' (ex.: 172.16.0.0/16)") from exc
+    return tuple(redes)
+
+
 def carregar() -> Config:
     url_base = os.environ.get("PORTAL_URL_BASE", "http://localhost").rstrip("/")
     return Config(
@@ -99,6 +125,7 @@ def carregar() -> Config:
         cookie_dominio=os.environ.get("PORTAL_COOKIE_DOMINIO", ""),
         url_publica=os.environ.get("PORTAL_URL_PUBLICA", "").rstrip("/"),
         sessao_horas=int(os.environ.get("PORTAL_SESSAO_HORAS", "12")),
+        redes_admin=_redes(os.environ.get("PORTAL_REDES_ADMIN", "")),
         docs_api=_bool("PORTAL_DOCS_API"),
         git_token=os.environ.get("PORTAL_GIT_TOKEN", "").strip(),
         git_host=os.environ.get("PORTAL_GIT_HOST", "github.com").strip(),

@@ -129,6 +129,9 @@ async def protecoes(request: Request, call_next):
     resp = await call_next(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "same-origin")
+    # O portal nao usa camera, microfone nem localizacao; nenhuma pagina embutida pode pedir.
+    resp.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     if caminho.startswith("/api/"):
         resp.headers.setdefault("Cache-Control", "no-store")
     if not caminho.startswith(("/docs", "/openapi")):
@@ -169,14 +172,42 @@ def exigir_liberado(usuario: Usuario = Depends(exigir_login)) -> Usuario:
     return usuario
 
 
-def exigir_admin(usuario: Usuario = Depends(exigir_liberado)) -> Usuario:
+def _ip_cliente(request: Request) -> str:
+    """IP de quem acessa (com HTTPS, o portal confia no Caddy para informar)."""
+    return request.client.host if request.client else ""
+
+
+def _rede_admin(request: Request) -> bool:
+    """True se o acesso vem de uma rede de onde a administracao abre (PORTAL_REDES_ADMIN)."""
+    if CFG.redes_admin is None:
+        return True
+    import ipaddress
+
+    try:
+        ip = ipaddress.ip_address(_ip_cliente(request))
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return any(ip in rede for rede in CFG.redes_admin)
+
+
+def exigir_admin(request: Request, usuario: Usuario = Depends(exigir_liberado)) -> Usuario:
     if not usuario.admin:
         raise HTTPException(403, "Acesso restrito a administradores.")
+    if not _rede_admin(request):
+        raise HTTPException(403, "A administração do portal só abre pela rede da empresa "
+                                 f"(seu endereço visto pelo portal: {_ip_cliente(request) or 'desconhecido'}).")
     return usuario
 
 
-def _publico(u: Usuario) -> dict:
-    return {"id": u.id, "usuario": u.usuario, "nome": u.nome, "perfil": u.perfil, "trocar_senha": u.trocar_senha}
+def _publico(u: Usuario, request: Request | None = None) -> dict:
+    dados = {"id": u.id, "usuario": u.usuario, "nome": u.nome, "perfil": u.perfil, "trocar_senha": u.trocar_senha}
+    if u.admin and request is not None and not _rede_admin(request):
+        # Administrador fora da rede da empresa: usa os sistemas, mas a tela esconde a administracao.
+        dados["admin_fora"] = True
+        dados["ip"] = _ip_cliente(request)
+    return dados
 
 
 def _definir_cookie(resp: Response, token: str) -> None:
@@ -213,7 +244,7 @@ def api_login(request: Request, response: Response, usuario: str = Body(...), se
     ip = request.client.host if request.client else "?"
     u, token = AUTH.login(usuario, senha, ip)
     _definir_cookie(response, token)
-    return _publico(u)
+    return _publico(u, request)
 
 
 @app.post("/api/auth/logout")
@@ -224,8 +255,8 @@ def api_logout(request: Request, response: Response) -> dict:
 
 
 @app.get("/api/auth/eu")
-def api_eu(usuario: Usuario = Depends(exigir_login)) -> dict:
-    return _publico(usuario)
+def api_eu(request: Request, usuario: Usuario = Depends(exigir_login)) -> dict:
+    return _publico(usuario, request)
 
 
 @app.post("/api/auth/senha")
@@ -281,8 +312,13 @@ def api_verificar(request: Request, solucao: str):
             return _pagina_aviso("Entre no portal primeiro",
                                  "Este sistema só é exibido para quem está conectado ao Portal de Soluções.", 401)
         return JSONResponse({"detail": "Sessao do portal expirada. Entre novamente."}, status_code=401)
-    if solucao not in ger().solucoes or not _pode_abrir(usuario, ger().solucoes[solucao]):
+    if solucao not in ger().solucoes or not _pode_abrir(usuario, ger().solucoes[solucao], request):
         if navegacao and solucao in ger().solucoes and ger().solucoes[solucao].somente_admin:
+            if usuario.admin:
+                return _pagina_aviso("Só pela rede da empresa",
+                                     f"{usuario.nome}, este sistema dá acesso total aos bancos de dados e só abre "
+                                     "pela rede da empresa (seu endereço visto pelo portal: "
+                                     f"{_ip_cliente(request) or 'desconhecido'}).", 403)
             return _pagina_aviso("Só para administradores",
                                  f"{usuario.nome}, este sistema dá acesso total aos bancos de dados e só abre "
                                  "para administradores do portal.", 403)
@@ -316,12 +352,14 @@ def api_logo(sid: str, usuario: Usuario = Depends(exigir_liberado)):
 
 
 @app.get("/api/meus-sistemas")
-def api_meus_sistemas(usuario: Usuario = Depends(exigir_liberado)) -> dict:
+def api_meus_sistemas(request: Request, usuario: Usuario = Depends(exigir_liberado)) -> dict:
     docker_ok = docker_cli.status().ok
     permitidas = None if usuario.admin else AUTH.acessos(usuario.id)
     itens = []
     for sol in ger().solucoes.values():
         if permitidas is not None and (sol.id not in permitidas or sol.somente_admin):
+            continue
+        if sol.somente_admin and not _pode_abrir(usuario, sol, request):
             continue
         estado = ger().status(sol)["estado"] if docker_ok else "indisponivel"
         itens.append({
@@ -877,9 +915,12 @@ def _validar_solucoes(ids: list[str], conceder: bool = True) -> list[str]:
     return ids
 
 
-def _pode_abrir(usuario: Usuario, sol: Solucao) -> bool:
-    """Admin abre tudo; os demais, o que foi liberado em Acessos e nao e so de administradores."""
-    return usuario.admin or (not sol.somente_admin and AUTH.pode_acessar(usuario, sol.id))
+def _pode_abrir(usuario: Usuario, sol: Solucao, request: Request | None = None) -> bool:
+    """Admin abre tudo; os demais, o que foi liberado em Acessos e nao e so de administradores.
+    Os so de administradores (pgAdmin, Studio) abrem so pela rede da empresa (PORTAL_REDES_ADMIN)."""
+    if sol.somente_admin:
+        return usuario.admin and (request is None or _rede_admin(request))
+    return usuario.admin or AUTH.pode_acessar(usuario, sol.id)
 
 
 def _nomes_solucoes(ids) -> str:

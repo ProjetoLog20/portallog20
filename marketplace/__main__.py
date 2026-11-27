@@ -278,10 +278,15 @@ def servir(args: argparse.Namespace) -> int:
         port=args.porta,
         reload=args.recarregar,
         proxy_headers=True,
-        # Com HTTPS, o portal so e acessado pelo Caddy (porta 8000 presa em 127.0.0.1): confia nele
-        # para saber o IP de quem acessa (limite de tentativas de login por IP).
+        # Sem "server: uvicorn" nas respostas (nao anunciar o servidor).
+        server_header=False,
+        # Com HTTPS, o portal e acessado pelo Caddy: confia nele para saber o IP de quem acessa (limite
+        # de tentativas de login e administracao so pela rede da empresa). So redes privadas, onde
+        # fica o Caddy: se a porta 8000 ficar exposta por engano, quem vem de um IP publico nao
+        # consegue informar um IP falso (X-Forwarded-For).
         forwarded_allow_ips=os.environ.get("PORTAL_PROXIES") or (
-            "*" if os.environ.get("PORTAL_URL_BASE", "").startswith("https://") else "127.0.0.1"),
+            config_mod.REDES_PRIVADAS if os.environ.get("PORTAL_URL_BASE", "").startswith("https://")
+            else "127.0.0.1"),
         log_config=_config_log(),
     )
     return 0

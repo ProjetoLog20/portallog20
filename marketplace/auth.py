@@ -118,10 +118,23 @@ class LimiteTentativas:
         self._falhas: dict[str, list[float]] = {}
         self._lock = threading.Lock()
 
+    MAX_CHAVES = 10_000
+
     def _recentes(self, chave: str, agora: float) -> list[float]:
         lista = [t for t in self._falhas.get(chave, []) if agora - t < self.janela]
-        self._falhas[chave] = lista
+        if lista:
+            self._falhas[chave] = lista
+        else:
+            self._falhas.pop(chave, None)
         return lista
+
+    def _limpar_vencidas(self, agora: float) -> None:
+        """Muitas chaves (ex.: tentativas com milhares de usuarios inventados): tira as vencidas, para a
+        memoria nao crescer sem limite."""
+        if len(self._falhas) < self.MAX_CHAVES:
+            return
+        for c in [c for c, ts in self._falhas.items() if not ts or agora - ts[-1] >= self.janela]:
+            del self._falhas[c]
 
     def bloqueado(self, *chaves: str) -> bool:
         agora = time.time()
@@ -131,8 +144,11 @@ class LimiteTentativas:
     def falhou(self, *chaves: str) -> None:
         agora = time.time()
         with self._lock:
+            self._limpar_vencidas(agora)
             for c in chaves:
-                self._recentes(c, agora).append(agora)
+                lista = self._recentes(c, agora)
+                lista.append(agora)
+                self._falhas[c] = lista
 
     def limpar(self, *chaves: str) -> None:
         with self._lock:

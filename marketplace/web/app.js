@@ -33,6 +33,8 @@ const PERFIL_TEXTO = { "": "usuario", usuario: "usuario", "usuário": "usuario",
 
 const $conteudo = document.getElementById("conteudo");
 let eu = null;
+/** Administrador dentro da rede da empresa: so ai a administracao do portal aparece (PORTAL_REDES_ADMIN). */
+const ehAdminAqui = () => eu?.perfil === "admin" && !eu.admin_fora;
 let timer = null;
 let ritmo = null;          // [ms com algo em andamento, ms parado]
 let emAndamento = false;
@@ -229,7 +231,7 @@ function montarTopo() {
   if (!eu.trocar_senha) {
     const item = (href, rotulo, ativo) => h("a", { href, "aria-current": ativo ? "page" : null }, rotulo);
     menu.append(item("#/", "Meus sistemas", rota === "#/"));
-    if (eu.perfil === "admin") {
+    if (ehAdminAqui()) {
       menu.append(h("span", { class: "menu-divisa", "aria-hidden": "true" }),
         item("#/admin/solucoes", "Soluções", rota.startsWith("#/admin/solucao") || rota === "#/admin/nova-solucao" || rota.startsWith("#/admin/editar-solucao/")),
         item("#/admin/usuarios", "Usuários", rota === "#/admin/usuarios"),
@@ -245,7 +247,7 @@ function montarTopo() {
   const detalhes = h("details", { class: "conta-menu" },
     h("summary", { "aria-label": "Sua conta" },
       avatar(eu),
-      h("span", { class: "conta-nome" }, eu.nome, h("small", {}, eu.perfil === "admin" ? "Administrador" : eu.usuario))),
+      h("span", { class: "conta-nome" }, eu.nome, h("small", {}, eu.perfil === "admin" ? (eu.admin_fora ? "Administrador (fora da rede)" : "Administrador") : eu.usuario))),
     h("div", { class: "conta-lista" },
       h("div", { class: "conta-cabeca" }, h("strong", {}, eu.nome), h("small", {}, eu.usuario)),
       eu.trocar_senha ? null : h("a", { href: "#/senha" }, "Trocar senha"),
@@ -359,7 +361,9 @@ async function telaMeusSistemas() {
       h("section", { class: "intro intro-linha" },
         h("div", {},
           h("h1", {}, `Olá, ${eu.nome.split(" ")[0]}`),
-          h("p", {}, eu.perfil === "admin"
+          h("p", {}, eu.admin_fora
+            ? `Você está fora da rede da empresa: a administração do portal e o pgAdmin/Studio só abrem por dentro (seu endereço: ${eu.ip || "desconhecido"}). Os sistemas abrem normalmente.`
+            : eu.perfil === "admin"
             ? "Como administrador, você vê todos os sistemas. Para instalar ou configurar, acesse o painel de Soluções."
             : "Estes são os sistemas que você tem acesso.")),
         busca),
@@ -3658,7 +3662,7 @@ async function navegar() {
     return;
   }
   if (eu?.trocar_senha && rota !== "#/senha") { location.hash = "#/senha"; return; }
-  if (rota.startsWith("#/admin") && eu?.perfil !== "admin") { location.hash = "#/"; return; }
+  if (rota.startsWith("#/admin") && !ehAdminAqui()) { location.hash = "#/"; return; }
 
   montarTopo();
   $conteudo.classList.toggle("conteudo-cheio", rota === "#/login");
